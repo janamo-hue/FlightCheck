@@ -60,3 +60,24 @@ routes:
     drop_pct: 18
     sweep_stride_days: 6
     sweep_weekday: 4
+
+  - name: Seattle to Albuquerque
+    origin: SEA
+    destination: ABQ
+    nonstop: false
+    sweep_stride_days: 10
+    watchlist_size: 3
+
+  - name: Seattle to New Orleans
+    origin: SEA
+    destination: MSY
+    nonstop: false
+    sweep_stride_days: 10
+    watchlist_size: 3
+
+  - name: Seattle to Mexico City
+    origin: SEA
+    destination: MEX
+    nonstop: false
+    sweep_stride_days: 10
+    watchlist_size: 3
