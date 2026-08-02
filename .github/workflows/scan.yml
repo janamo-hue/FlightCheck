@@ -1,0 +1,58 @@
+name: fare scan
+
+on:
+  schedule:
+    # 14:10 UTC = 07:10 Pacific daylight, 06:10 Pacific standard.
+    - cron: "10 14 * * *"
+  workflow_dispatch:
+    inputs:
+      sweep:
+        description: "Force a full sweep"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Price everything, send and write nothing"
+        type: boolean
+        default: false
+
+concurrency:
+  group: fare-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Scan
+        env:
+          AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
+          AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
+          AMADEUS_ENV: ${{ vars.AMADEUS_ENV || 'production' }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          ALERT_EMAIL_FROM: ${{ vars.ALERT_EMAIL_FROM }}
+        run: |
+          python -m src.scan \
+            ${{ inputs.sweep && '--sweep' || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Commit price history
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git config user.name "fare-scan"
+          git config user.email "actions@github.com"
+          git add data/
+          git diff --staged --quiet || git commit -m "prices $(date -u +%Y-%m-%d)"
+          git push

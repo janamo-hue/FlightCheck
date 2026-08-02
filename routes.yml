@@ -1,0 +1,62 @@
+# Alaska direct-flight price watch configuration.
+#
+# Quota note: Amadeus Self-Service free tier is 2000 Flight Offers Search
+# calls/month. Run `python -m src.budget` to see projected usage for this file.
+
+defaults:
+  adults: 1
+  currency: USD
+  cabin: ECONOMY
+  carrier: AS              # Alaska Airlines
+  nonstop: true
+
+  # Search window, in days from the run date.
+  window_start_days: 14
+  window_end_days: 180
+
+  # Deep sweep: sample every Nth day across the window, on sweep_weekday only.
+  sweep_stride_days: 4
+  sweep_weekday: 6         # 0=Mon ... 6=Sun
+  # Optional: restrict sampled departures to these weekdays. Empty = all.
+  depart_weekdays: []
+
+  # Daily watchlist: re-check the K cheapest date pairs found in the last sweep.
+  watchlist_size: 8
+
+  # Round-trip lengths to price. Set one_way: true to ignore.
+  trip_lengths: [7]
+  one_way: false
+
+  # Alerting
+  drop_pct: 15             # alert when price falls this % below baseline
+  baseline_days: 14        # trailing window for the median baseline
+  min_observations: 3      # need this much history before percent alerts fire
+  alert_on_all_time_low: true
+  all_time_low_margin_pct: 3    # ignore new lows shallower than this
+  debounce_hours: 48       # suppress repeat alerts for the same date pair
+  realert_pct: 5           # unless it drops a further this % below last alert
+
+# Hard ceiling on API calls per run. The scanner truncates to fit.
+daily_call_budget: 120
+
+routes:
+  - name: Seattle to San Diego
+    origin: SEA
+    destination: SAN
+    trip_lengths: [4, 7]
+    drop_pct: 12
+    sweep_weekday: 6
+
+  - name: Seattle to Boston
+    origin: SEA
+    destination: BOS
+    trip_lengths: [7]
+    sweep_weekday: 2
+
+  - name: Seattle to Barcelona
+    origin: SEA
+    destination: BCN
+    trip_lengths: [10, 14]
+    drop_pct: 18
+    sweep_stride_days: 6
+    sweep_weekday: 4
