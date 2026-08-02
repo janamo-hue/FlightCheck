@@ -66,14 +66,24 @@ def evaluate(
         if drop_pct >= route.drop_pct:
             triggered = True
 
-    prior_low = min(o.price for o in prior)
-    # Require a real margin, otherwise a flat fare that ticks down a dollar
-    # generates an alert on every run.
-    all_time_low = current.price < prior_low * (1 - route.all_time_low_margin_pct / 100)
+    # Scope the low to a fixed horizon. Comparing against everything retained
+    # meant one cheap fare from eight months ago muted this trigger forever,
+    # while the percent baseline only looked back baseline_days. Two horizons
+    # for two triggers made the alerting hard to reason about.
+    atl_cutoff = (asof - timedelta(days=route.atl_days)).isoformat()
+    recent = [o for o in prior if o.observed_at >= atl_cutoff]
+
+    all_time_low = False
+    if recent:
+        # Require a real margin, otherwise a flat fare that ticks down a dollar
+        # generates an alert on every run.
+        prior_low = min(o.price for o in recent)
+        all_time_low = current.price < prior_low * (1 - route.all_time_low_margin_pct / 100)
+
     if (
         route.alert_on_all_time_low
         and all_time_low
-        and len(prior) >= route.min_observations
+        and len(recent) >= route.min_observations
     ):
         triggered = True
 

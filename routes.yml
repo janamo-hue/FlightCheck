@@ -33,33 +33,20 @@ defaults:
   min_observations: 3      # need this much history before percent alerts fire
   alert_on_all_time_low: true
   all_time_low_margin_pct: 3    # ignore new lows shallower than this
+  atl_days: 90                  # horizon for 'all-time' low, keeps it comparable
   debounce_hours: 48       # suppress repeat alerts for the same date pair
   realert_pct: 5           # unless it drops a further this % below last alert
 
-# Hard ceiling on API calls per run. The scanner truncates to fit.
+# Hard ceiling on API calls per run. Sweeps resume next run if truncated.
 daily_call_budget: 120
 
+# Monthly Amadeus allowance. The scanner stops at reserve_pct of this so a
+# busy month cannot silently burn the quota and blank out the rest of it.
+monthly_call_quota: 2000
+quota_reserve_pct: 95
+
 routes:
-  - name: Seattle to San Diego
-    origin: SEA
-    destination: SAN
-    trip_lengths: [4, 7]
-    drop_pct: 12
-    sweep_weekday: 6
 
-  - name: Seattle to Boston
-    origin: SEA
-    destination: BOS
-    trip_lengths: [7]
-    sweep_weekday: 2
-
-  - name: Seattle to Barcelona
-    origin: SEA
-    destination: BCN
-    trip_lengths: [10, 14]
-    drop_pct: 18
-    sweep_stride_days: 6
-    sweep_weekday: 4
 
   - name: Seattle to Albuquerque
     origin: SEA

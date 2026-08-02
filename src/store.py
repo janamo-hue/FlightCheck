@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
 HISTORY_PATH = os.environ.get("HISTORY_FILE", "data/history.jsonl")
+ARCHIVE_PATH = os.environ.get("ARCHIVE_FILE", "data/archive.jsonl")
 STATE_PATH = os.environ.get("STATE_FILE", "data/state.json")
 
 
@@ -57,23 +58,51 @@ def append(observations: list[Observation], path: str | None = None) -> None:
             fh.write(json.dumps(asdict(obs), sort_keys=True) + "\n")
 
 
-def prune(path: str | None = None, keep_days: int = 400) -> int:
-    """Drop observations older than keep_days and departures already in the past."""
-    path = path or HISTORY_PATH
-    if not os.path.exists(path):
-        return 0
-    cutoff = (now() - timedelta(days=keep_days)).isoformat()
-    today = now().date().isoformat()
+def archive(path: str | None = None, archive_path: str | None = None) -> tuple[int, int]:
+    """Move observations for departed dates out of the live file.
 
-    kept = [
-        o
-        for o in load_history(path)
-        if o.observed_at >= cutoff and o.depart >= today
-    ]
+    An earlier version deleted them. That threw away the most valuable thing
+    this tool produces: the full price curve for a flight from 180 days out to
+    departure, which is what answers "when does this route actually bottom
+    out". Live history stays small for fast median lookups; the archive keeps
+    the record.
+    """
+    path = path or HISTORY_PATH
+    archive_path = archive_path or ARCHIVE_PATH
+    if not os.path.exists(path):
+        return 0, 0
+
+    today = now().date().isoformat()
+    rows = load_history(path)
+    live = [o for o in rows if o.depart >= today]
+    departed = [o for o in rows if o.depart < today]
+
+    if departed:
+        os.makedirs(os.path.dirname(archive_path) or ".", exist_ok=True)
+        with open(archive_path, "a") as fh:
+            for obs in departed:
+                fh.write(json.dumps(asdict(obs), sort_keys=True) + "\n")
+
     with open(path, "w") as fh:
-        for obs in kept:
+        for obs in live:
             fh.write(json.dumps(asdict(obs), sort_keys=True) + "\n")
-    return len(kept)
+
+    return len(live), len(departed)
+
+
+def prune_alert_state(state: dict, keep_days: int = 30, asof: datetime | None = None) -> int:
+    """Drop alert debounce records past any plausible debounce window.
+
+    Without this the dict grows for the life of the repo, since every alert
+    ever fired leaves an entry keyed by a date pair that eventually departs.
+    """
+    asof = asof or now()
+    cutoff = (asof - timedelta(days=keep_days)).isoformat()
+    alerts = state.get("alerts", {})
+    stale = [k for k, v in alerts.items() if v.get("at", "") < cutoff]
+    for key in stale:
+        del alerts[key]
+    return len(stale)
 
 
 def index(history: list[Observation]) -> dict[tuple[str, str], list[Observation]]:
@@ -100,3 +129,19 @@ def save_state(state: dict, path: str | None = None) -> None:
     with open(path, "w") as fh:
         json.dump(state, fh, indent=2, sort_keys=True)
         fh.write("\n")
+
+
+def quota(state: dict, asof: datetime | None = None) -> dict:
+    """Rolling monthly API call counter, reset on month change."""
+    asof = asof or now()
+    month = asof.strftime("%Y-%m")
+    q = state.setdefault("quota", {"month": month, "calls": 0})
+    if q.get("month") != month:
+        q.update(month=month, calls=0)
+    return q
+
+
+def spend_quota(state: dict, calls: int, asof: datetime | None = None) -> int:
+    q = quota(state, asof)
+    q["calls"] += calls
+    return q["calls"]

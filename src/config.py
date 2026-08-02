@@ -34,6 +34,7 @@ class Route:
     min_observations: int = 3
     alert_on_all_time_low: bool = True
     all_time_low_margin_pct: float = 3.0
+    atl_days: int = 90
     debounce_hours: int = 48
     realert_pct: float = 5.0
 
@@ -46,6 +47,8 @@ class Route:
 class Config:
     routes: list[Route]
     daily_call_budget: int = 70
+    monthly_call_quota: int = 2000
+    quota_reserve_pct: float = 95.0
 
 
 def load(path: str | None = None) -> Config:
@@ -66,4 +69,9 @@ def load(path: str | None = None) -> Config:
     if not routes:
         raise ValueError("no routes configured")
 
-    return Config(routes=routes, daily_call_budget=int(raw.get("daily_call_budget", 70)))
+    return Config(
+        routes=routes,
+        daily_call_budget=int(raw.get("daily_call_budget", 70)),
+        monthly_call_quota=int(raw.get("monthly_call_quota", 2000)),
+        quota_reserve_pct=float(raw.get("quota_reserve_pct", 95)),
+    )

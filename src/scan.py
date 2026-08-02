@@ -54,6 +54,22 @@ def main(argv=None) -> int:
         state["sweep_cycles"] = {}
 
     budget = args.limit or cfg.daily_call_budget
+
+    # Stop short of the monthly allowance rather than discovering it mid-month
+    # when Amadeus starts rejecting calls and the tool goes quiet.
+    q = store.quota(state, asof)
+    ceiling = int(cfg.monthly_call_quota * cfg.quota_reserve_pct / 100)
+    remaining = ceiling - q["calls"]
+    if remaining <= 0:
+        log.warning(
+            "monthly quota reserve reached: %d/%d calls used this month, "
+            "resuming in %s", q["calls"], ceiling, "next month")
+        return 0
+    if remaining < budget:
+        log.warning("throttling to %d calls, only %d left before the reserve",
+                    remaining, remaining)
+        budget = remaining
+
     tasks = planner.plan(cfg.routes, today, state, budget)
     if not tasks:
         log.info("nothing to price today")
@@ -140,7 +156,13 @@ def main(argv=None) -> int:
     if triggered:
         notify.send(triggered)
 
-    store.prune()
+    used = store.spend_quota(state, client.calls_made, asof)
+    live, moved = store.archive()
+    dropped = store.prune_alert_state(state, asof=asof)
+    log.info("quota %d/%d this month | history %d live, %d archived | "
+             "%d stale alert records dropped",
+             used, cfg.monthly_call_quota, live, moved, dropped)
+
     store.save_state(state)
     return 0
 

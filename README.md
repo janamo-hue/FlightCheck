@@ -53,8 +53,10 @@ not drag the reference down and mask a genuine drop later.
 Two triggers:
 
 1. Price falls `drop_pct` below the baseline.
-2. Price sets a new low, by at least `all_time_low_margin_pct`. Without that
-   margin a flat fare that ticks down a dollar alerts on every run.
+2. Price sets a new low within the last `atl_days`, by at least
+   `all_time_low_margin_pct`. Without the margin a flat fare that ticks down a
+   dollar alerts on every run; without the horizon a single cheap fare from
+   eight months ago mutes the trigger permanently.
 
 Both are gated by `min_observations`, so a brand new route stays quiet until it
 has history. After an alert fires, that date pair is silent for
@@ -106,10 +108,30 @@ The workflow runs daily at 14:10 UTC and commits `data/` back to the repo.
 
 `data/history.jsonl` is append-only, one observation per line, committed by CI.
 Chosen over Postgres so there is nothing to provision and git diffs stay
-readable. At three routes it is roughly 60k rows a year, low single-digit
-megabytes. `store.prune()` drops departures that have passed. If it ever
-outgrows this, reimplement `load_history` and `append` against Supabase and
-nothing else changes.
+readable. If it outgrows this, reimplement `load_history` and `append` against
+Supabase and nothing else changes.
+
+Once a departure date passes, its rows move to `data/archive.jsonl` rather than
+being deleted. The live file stays small enough for fast median lookups, and
+the archive accumulates the full price curve for every flight from 180 days out
+to departure. That archive is the answer to "when does this route actually
+bottom out", which is worth more than the alerts.
+
+## Report
+
+`python -m src.report` writes `docs/index.html`: per-route cards for the five
+cheapest date pairs, each with an inline SVG price curve and the low marked.
+No chart library and no build step, so it works from a `file://` URL or from
+GitHub Pages. CI regenerates and commits it on every run. To publish, set
+Settings > Pages to serve from `main` and the `/docs` folder.
+
+## Quota
+
+`state.json` carries a rolling monthly counter. The scanner stops once it hits
+`quota_reserve_pct` of `monthly_call_quota`, so a heavy month degrades to
+"nothing new today" instead of Amadeus rejecting calls and the tool going
+quiet without explanation. `python -m src.budget` projects usage before you
+add routes.
 
 ## Caveats worth knowing
 
