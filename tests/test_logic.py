@@ -4,7 +4,14 @@ import pytest
 
 from src.alerts import evaluate, record_alert
 from src.config import Route
-from src.planner import plan, should_sweep, sweep_tasks, watchlist_tasks
+from src.planner import (
+    mark_priced as planner_mark,
+    plan,
+    should_sweep,
+    sweep_complete as planner_sweep_complete,
+    sweep_tasks,
+    watchlist_tasks,
+)
 from src.store import Observation
 
 TODAY = date(2026, 8, 2)  # a Sunday
@@ -164,3 +171,99 @@ def test_debounce_expires():
     state = {}
     record_alert(evaluate(r, obs(300), prior, state, NOW), state, NOW)
     assert evaluate(r, obs(300), prior, state, NOW + timedelta(hours=49)) is not None
+
+
+# ------------------------------------------------- fixes: stride composition
+
+def test_stride_applies_after_weekday_filter():
+    # Every 2nd Friday across ~166 days is 12. Striding first and then testing
+    # the weekday would give 12 only by luck; stride 4 would collapse to 6.
+    assert len(sweep_tasks(route(sweep_stride_days=2, depart_weekdays=[4]), TODAY)) == 12
+    assert len(sweep_tasks(route(sweep_stride_days=4, depart_weekdays=[4]), TODAY)) == 6
+    every_friday = sweep_tasks(route(sweep_stride_days=1, depart_weekdays=[4]), TODAY)
+    assert len(every_friday) == 24
+    gaps = {
+        (date.fromisoformat(b.depart) - date.fromisoformat(a.depart)).days
+        for a, b in zip(every_friday, every_friday[1:])
+    }
+    assert gaps == {7}
+
+
+def test_stride_unchanged_without_weekday_filter():
+    tasks = sweep_tasks(route(sweep_stride_days=4), TODAY)
+    departs = [date.fromisoformat(t.depart) for t in tasks]
+    assert {(b - a).days for a, b in zip(departs, departs[1:])} == {4}
+
+
+# ----------------------------------------------- fixes: resumable sweeps
+
+def test_truncated_sweep_is_not_marked_complete():
+    r = route()
+    state = {}
+    total = len(sweep_tasks(r, TODAY))
+    plan([r], TODAY, state, budget=10)
+    assert "SEA-SAN" not in state.get("last_sweep", {})
+    assert len(state["sweep_cycles"]["SEA-SAN"]["pending"]) == total
+
+
+def test_sweep_resumes_and_eventually_closes():
+    r = route()
+    state = {}
+    total = len(sweep_tasks(r, TODAY))
+    runs = 0
+    while True:
+        runs += 1
+        tasks = plan([r], TODAY, state, budget=10)
+        for t in tasks:
+            planner_mark(r, t.pair, state)
+        if planner_sweep_complete(r, TODAY, state):
+            break
+        assert runs < 50
+    assert runs == -(-total // 10)                      # ceil division
+    assert state["last_sweep"]["SEA-SAN"] == TODAY.isoformat()
+    assert "SEA-SAN" not in state["sweep_cycles"]
+
+
+def test_resumed_sweep_does_not_repeat_priced_pairs():
+    r = route()
+    state = {}
+    first = plan([r], TODAY, state, budget=10)
+    for t in first:
+        planner_mark(r, t.pair, state)
+    second = plan([r], TODAY, state, budget=10)
+    assert not ({t.pair for t in first} & {t.pair for t in second})
+
+
+def test_backlog_is_interleaved_so_no_route_starves():
+    routes = [route(name="a"), route(name="b", destination="BOS"),
+              route(name="c", destination="BCN")]
+    tasks = plan(routes, TODAY, {}, budget=12)
+    counts = {}
+    for t in tasks:
+        counts[t.route.key] = counts.get(t.route.key, 0) + 1
+    assert len(counts) == 3 and max(counts.values()) - min(counts.values()) <= 1
+
+
+def test_pairs_falling_out_of_window_are_dropped_from_backlog():
+    r = route()
+    state = {"sweep_cycles": {"SEA-SAN": {
+        "started": TODAY.isoformat(),
+        "pending": ["2026-08-03|2026-08-10", "2026-11-01|2026-11-08"]}}}
+    tasks = plan([r], TODAY, state, budget=99)
+    assert [t.depart for t in tasks if t.tier == "sweep"] == ["2026-11-01"]
+
+
+# ------------------------------------------------------- fixes: booking link
+
+def test_booking_url_is_google_flights_with_both_dates():
+    from src.notify import booking_url
+    from src.alerts import Alert
+    a = Alert(route_name="x", route_key="SEA-BCN", depart="2026-10-01",
+              ret="2026-10-11", price=500.0, currency="USD", baseline=600.0,
+              drop_pct=16.7, all_time_low=False, flight_numbers=["AS1"],
+              observations=5)
+    url = booking_url(a)
+    assert url.startswith("https://www.google.com/travel/flights?")
+    assert "alaskaair" not in url
+    for token in ("SEA", "BCN", "2026-10-01", "2026-10-11", "nonstop"):
+        assert token.replace("-", "-") in url.replace("%2C", ",").replace("+", " ")

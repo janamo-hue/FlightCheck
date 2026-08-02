@@ -20,6 +20,15 @@ drops on the dates you would actually book. Watchlist tasks are queued first, so
 if a run hits the call budget the sweep is what gets truncated, not the dates
 you care about.
 
+A sweep that does not fit in one run is **resumed, not dropped**. The pairs
+still owed live in `state.json` under `sweep_cycles`, and `last_sweep` is only
+stamped once the cycle actually finishes. Backlogs from several routes are
+interleaved round-robin so a long route cannot starve a short one. This matters
+most on the very first run, when every route wants a full sweep at once.
+
+When `depart_weekdays` is set, `sweep_stride_days` applies to the matching days,
+so `[4]` with a stride of 2 means every second Friday.
+
 Run `python -m src.budget` before adding routes:
 
 ```
@@ -115,3 +124,7 @@ nothing else changes.
   you want Mileage Plan award alerts that is a separate data source entirely.
 - **Prices are per the configured `adults` count** and include taxes
   (`grandTotal`).
+- **Alert links go to Google Flights**, not Alaska. Alaska publishes no
+  deep-link format, so rather than ship a guessed URL that might land on an
+  empty search, the email links to a Google Flights query for the same
+  nonstop itinerary.

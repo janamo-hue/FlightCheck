@@ -36,9 +36,11 @@ def main() -> int:
         (len(planner.sweep_tasks(r, today)) for r in cfg.routes), default=0
     ) + sum(r.watchlist_size for r in cfg.routes)
     if peak > cfg.daily_call_budget:
-        print(f"\nWarning: a sweep day needs up to {peak} calls but "
-              f"daily_call_budget is {cfg.daily_call_budget}. Sweeps will be "
-              f"truncated. Raise the budget or the sweep stride.")
+        days = -(-peak // max(cfg.daily_call_budget, 1))
+        print(f"\nNote: a sweep needs up to {peak} calls but daily_call_budget "
+              f"is {cfg.daily_call_budget}, so a cycle will span about {days} "
+              f"runs. Work is resumed, not dropped, but the far window updates "
+              f"more slowly. Raise the budget or the stride to tighten it.")
 
     if total > FREE_TIER:
         print("\nOver quota. Raise sweep_stride_days, shrink watchlist_size, "

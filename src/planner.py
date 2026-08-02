@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from itertools import zip_longest
 
 from .config import Route
 
@@ -29,16 +30,20 @@ class Task:
 
 
 def window_dates(route: Route, today: date) -> list[date]:
+    """Departure dates to sample.
+
+    The stride is applied *after* the weekday filter, so
+    `depart_weekdays: [4], sweep_stride_days: 2` means every second Friday.
+    Striding first and then testing the weekday makes the two settings
+    multiply, which silently scans a fraction of the intended dates.
+    """
     start = today + timedelta(days=route.window_start_days)
     end = today + timedelta(days=route.window_end_days)
 
-    out = []
-    cursor = start
-    while cursor <= end:
-        if not route.depart_weekdays or cursor.weekday() in route.depart_weekdays:
-            out.append(cursor)
-        cursor += timedelta(days=route.sweep_stride_days)
-    return out
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    if route.depart_weekdays:
+        days = [d for d in days if d.weekday() in route.depart_weekdays]
+    return days[:: route.sweep_stride_days]
 
 
 def _pairs(route: Route, depart: date) -> list[tuple[str, str | None]]:
@@ -68,6 +73,56 @@ def should_sweep(route: Route, today: date, state: dict) -> bool:
     return (today - date.fromisoformat(last)).days >= 10
 
 
+def open_sweep(route: Route, today: date, state: dict) -> list[str]:
+    """Pairs still owed for this route's current sweep cycle.
+
+    Opens a new cycle when one is due. Mutates state: the pending list has to
+    survive to the next run, otherwise a sweep truncated by the call budget is
+    silently forgotten and the route waits a full week for another chance.
+    """
+    cycles = state.setdefault("sweep_cycles", {})
+    cycle = cycles.get(route.key)
+
+    if cycle is None:
+        if not should_sweep(route, today, state):
+            return []
+        cycle = {
+            "started": today.isoformat(),
+            "pending": [t.pair for t in sweep_tasks(route, today)],
+        }
+        cycles[route.key] = cycle
+
+    # Drop pairs that rolled out of the window while the cycle was in progress.
+    horizon = today + timedelta(days=route.window_start_days)
+    cycle["pending"] = [
+        p for p in cycle["pending"]
+        if date.fromisoformat(p.partition("|")[0]) >= horizon
+    ]
+    return cycle["pending"]
+
+
+def mark_priced(route: Route, pair: str, state: dict) -> None:
+    """Retire a pair from the open sweep cycle. Called on attempt, not success.
+
+    A date with no Alaska nonstop service returns no offer, and retrying it
+    every run would burn the quota forever.
+    """
+    cycle = state.get("sweep_cycles", {}).get(route.key)
+    if cycle and pair in cycle["pending"]:
+        cycle["pending"].remove(pair)
+
+
+def sweep_complete(route: Route, today: date, state: dict) -> bool:
+    """True if the cycle just finished. Closes it out and stamps last_sweep."""
+    cycles = state.get("sweep_cycles", {})
+    cycle = cycles.get(route.key)
+    if cycle is None or cycle["pending"]:
+        return False
+    del cycles[route.key]
+    state.setdefault("last_sweep", {})[route.key] = today.isoformat()
+    return True
+
+
 def watchlist_tasks(route: Route, today: date, state: dict) -> list[Task]:
     pairs = state.get("watchlists", {}).get(route.key, [])
     horizon = today + timedelta(days=route.window_start_days)
@@ -82,14 +137,27 @@ def watchlist_tasks(route: Route, today: date, state: dict) -> list[Task]:
 
 
 def plan(routes: list[Route], today: date, state: dict, budget: int) -> list[Task]:
-    """Build the run's task list, watchlist first so it survives truncation."""
+    """Build the run's task list, watchlist first so it survives truncation.
+
+    Sweep work left over after the budget stays in state and resumes next run,
+    interleaved round-robin so one long route cannot starve the others.
+    """
     watch: list[Task] = []
-    sweep: list[Task] = []
+    backlogs: list[list[Task]] = []
 
     for route in routes:
         watch.extend(watchlist_tasks(route, today, state))
-        if should_sweep(route, today, state):
-            sweep.extend(sweep_tasks(route, today))
+        pending = open_sweep(route, today, state)
+        if pending:
+            backlogs.append([
+                Task(route=route, depart=p.partition("|")[0],
+                     ret=p.partition("|")[2] or None, tier="sweep")
+                for p in pending
+            ])
+
+    sweep: list[Task] = []
+    for row in zip_longest(*backlogs):
+        sweep.extend(t for t in row if t is not None)
 
     seen: set[tuple[str, str]] = set()
     ordered: list[Task] = []

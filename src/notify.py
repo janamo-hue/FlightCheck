@@ -17,20 +17,20 @@ RESEND_URL = "https://api.resend.com/emails"
 
 
 def booking_url(alert: Alert) -> str:
-    """Deep link into Alaska's search results for this itinerary."""
+    """Google Flights search for this itinerary.
+
+    An earlier version built an alaskaair.com/search/results deep link from
+    guessed query parameters. Alaska publishes no deep-link format and the
+    guess could not be verified, so it was dropped rather than ship a link
+    that may land on an empty search. Google Flights accepts a plain natural
+    language query and shows the Alaska fare alongside the alternatives.
+    """
     origin, destination = alert.route_key.split("-")
-    params = {
-        "O": origin,
-        "D": destination,
-        "OD": alert.depart,
-        "A": "1",
-        "C": "0",
-        "L": "0",
-        "RT": "true" if alert.ret else "false",
-    }
+    query = f"Flights from {origin} to {destination} on {alert.depart}"
     if alert.ret:
-        params["DD"] = alert.ret
-    return f"https://www.alaskaair.com/search/results?{urlencode(params)}"
+        query += f" through {alert.ret}"
+    query += " nonstop"
+    return "https://www.google.com/travel/flights?" + urlencode({"q": query})
 
 
 def render(alerts: list[Alert]) -> tuple[str, str]:
@@ -64,7 +64,7 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
                 <div style="font-size:20px;font-weight:700;">{a.currency} {a.price:,.0f}</div>
                 <div style="color:#71717a;font-size:12px;">baseline {baseline}</div>
                 <div style="color:#15803d;font-size:12px;">{html.escape(", ".join(tags))}</div>
-                <a href="{booking_url(a)}" style="font-size:12px;">book</a>
+                <a href="{booking_url(a)}" style="font-size:12px;">search Google Flights</a>
               </td>
             </tr>"""
         )

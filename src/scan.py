@@ -51,6 +51,7 @@ def main(argv=None) -> int:
 
     if args.sweep:
         state["last_sweep"] = {}
+        state["sweep_cycles"] = {}
 
     budget = args.limit or cfg.daily_call_budget
     tasks = planner.plan(cfg.routes, today, state, budget)
@@ -59,7 +60,9 @@ def main(argv=None) -> int:
         return 0
 
     sweeping = {t.route.key for t in tasks if t.tier == "sweep"}
-    log.info("%d calls planned (%d routes sweeping)", len(tasks), len(sweeping))
+    owed = sum(len(c["pending"]) for c in state.get("sweep_cycles", {}).values())
+    log.info("%d calls planned, %d routes sweeping, %d sweep pairs owed",
+             len(tasks), len(sweeping), owed)
 
     client = Amadeus()
     buckets = store.index(history)
@@ -85,6 +88,10 @@ def main(argv=None) -> int:
         except Exception:
             log.exception("failed pricing %s %s", task.route.key, task.pair)
             continue
+
+        # Attempted counts as done. Retrying a date with no service every run
+        # would never let the cycle close.
+        planner.mark_priced(task.route, task.pair, state)
 
         if offer is None:
             log.debug("no direct %s service %s %s", task.route.carrier, task.route.key, task.pair)
@@ -122,9 +129,13 @@ def main(argv=None) -> int:
     store.append(fresh)
     combined = history + fresh
     for route in cfg.routes:
-        if route.key in sweeping:
+        if planner.sweep_complete(route, today, state):
             refresh_watchlist(route, combined, state, today)
-            state.setdefault("last_sweep", {})[route.key] = today.isoformat()
+            log.info("sweep complete: %s", route.key)
+        else:
+            owed = len(state.get("sweep_cycles", {}).get(route.key, {}).get("pending", []))
+            if owed:
+                log.info("sweep resumes next run: %s, %d pairs owed", route.key, owed)
 
     if triggered:
         notify.send(triggered)
