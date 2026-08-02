@@ -64,14 +64,12 @@ routes:
   - name: Seattle to Albuquerque
     origin: SEA
     destination: ABQ
-    nonstop: false
     sweep_stride_days: 10
     watchlist_size: 3
 
   - name: Seattle to New Orleans
     origin: SEA
     destination: MSY
-    nonstop: false
     sweep_stride_days: 10
     watchlist_size: 3
 
