@@ -16,14 +16,18 @@ log = logging.getLogger(__name__)
 RESEND_URL = "https://api.resend.com/emails"
 
 
+REPORT_URL = os.environ.get("REPORT_URL", "")
+
+
 def booking_url(alert: Alert) -> str:
-    """Google Flights search for this itinerary.
+    """Google Flights search for the exact dates.
 
     An earlier version built an alaskaair.com/search/results deep link from
-    guessed query parameters. Alaska publishes no deep-link format and the
-    guess could not be verified, so it was dropped rather than ship a link
-    that may land on an empty search. Google Flights accepts a plain natural
-    language query and shows the Alaska fare alongside the alternatives.
+    guessed query parameters. Alaska publishes no dated deep-link format and
+    the guess could not be verified, so it was dropped rather than ship a
+    link that may land on an empty search. Google Flights takes a plain
+    natural language query and is the only source here that can be pinned to
+    a specific departure and return.
     """
     origin, destination = alert.route_key.split("-")
     query = f"Flights from {origin} to {destination} on {alert.depart}"
@@ -31,6 +35,33 @@ def booking_url(alert: Alert) -> str:
         query += f" through {alert.ret}"
     query += " nonstop"
     return "https://www.google.com/travel/flights?" + urlencode({"q": query})
+
+
+def alaska_url(alert: Alert) -> str | None:
+    """Alaska's own route page, which carries a fare calendar.
+
+    Verified to exist and resolve. Not date-specific, so it complements the
+    Google Flights link rather than replacing it: this one is where you
+    actually book, that one is where you confirm the date.
+    """
+    if not alert.cities:
+        return None
+    origin, destination = alert.cities
+    return f"https://www.alaskaair.com/en/flights-from-{origin}-to-{destination}"
+
+
+def _links(alert: Alert) -> str:
+    style = ("display:inline-block;padding:7px 12px;margin:6px 6px 0 0;"
+             "border-radius:6px;font-size:13px;text-decoration:none;")
+    out = [f'<a href="{booking_url(alert)}" '
+           f'style="{style}background:#2563eb;color:#fff;font-weight:600;">'
+           f'See these dates</a>']
+    alaska = alaska_url(alert)
+    if alaska:
+        out.append(f'<a href="{alaska}" '
+                   f'style="{style}border:1px solid #2563eb;color:#2563eb;">'
+                   f'Book on Alaska</a>')
+    return "".join(out)
 
 
 def render(alerts: list[Alert]) -> tuple[str, str]:
@@ -80,7 +111,7 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
                 <div style="color:{'#b45309' if a.kind == 'redeem' else '#15803d'};font-size:12px;">
                   {html.escape(", ".join(tags))}</div>
                 <div style="font-size:12px;font-weight:600;">{html.escape(a.verdict or '')}</div>
-                <a href="{booking_url(a)}" style="font-size:12px;">search Google Flights</a>
+                <div>{_links(a)}</div>
               </td>
             </tr>"""
         )
@@ -94,6 +125,7 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
         award space before acting on it.
       </p>
       <table style="width:100%;border-collapse:collapse;">{''.join(rows)}</table>
+      {f'<p style="margin-top:20px;"><a href="{REPORT_URL}">Full price history and charts</a></p>' if REPORT_URL else ''}
     </body></html>"""
 
     return subject, body

@@ -370,3 +370,74 @@ def test_unbranded_fare_is_assumed_to_earn():
     prior = [obs(400, 5), obs(400, 3), obs(400, 1)]
     alert = evaluate(points_route(award_floor_points=25000), obs(200), prior, {}, NOW)
     assert alert.earns_points is True
+
+
+# --------------------------------------------------------------------- links
+
+def make_alert(**kw):
+    from src.alerts import Alert
+    base = dict(kind="drop", route_name="Seattle to New Orleans",
+                route_key="SEA-MSY", depart="2026-10-01", ret="2026-10-08",
+                price=209.0, currency="USD", baseline=300.0, drop_pct=30.0,
+                all_time_low=False, flight_numbers=["AS490"], observations=6,
+                cities=("seattle", "new-orleans"))
+    base.update(kw)
+    return Alert(**base)
+
+
+def test_alaska_url_uses_the_verified_route_page_pattern():
+    from src.notify import alaska_url
+    assert alaska_url(make_alert()) == (
+        "https://www.alaskaair.com/en/flights-from-seattle-to-new-orleans")
+
+
+def test_alaska_url_is_omitted_without_city_slugs():
+    from src.notify import alaska_url
+    assert alaska_url(make_alert(cities=None)) is None
+
+
+def test_city_slugs_come_from_the_route_name():
+    assert route(name="Seattle to New Orleans").cities() == ("seattle", "new-orleans")
+    assert route(name="Seattle to Mexico City").cities() == ("seattle", "mexico-city")
+
+
+def test_explicit_city_overrides_beat_the_derived_name():
+    r = route(name="SEA run", origin_city="seattle", destination_city="orange-county")
+    assert r.cities() == ("seattle", "orange-county")
+
+
+def test_unparseable_route_name_yields_no_cities():
+    assert route(name="SEA-MSY watcher").cities() is None
+
+
+def test_email_contains_both_links_and_the_report_link(monkeypatch):
+    import importlib
+
+    import src.notify as notify
+    monkeypatch.setenv("REPORT_URL", "https://example.github.io/FlightCheck/")
+    importlib.reload(notify)
+    try:
+        _, body = notify.render([make_alert()])
+        assert "google.com/travel/flights" in body
+        assert "alaskaair.com/en/flights-from-seattle-to-new-orleans" in body
+        assert "https://example.github.io/FlightCheck/" in body
+    finally:
+        monkeypatch.delenv("REPORT_URL", raising=False)
+        importlib.reload(notify)
+
+
+def test_report_link_is_omitted_when_unset():
+    from src.notify import render
+    _, body = render([make_alert()])
+    assert "Full price history" not in body
+
+
+def test_dated_link_carries_both_dates():
+    from src.notify import booking_url
+    url = booking_url(make_alert())
+    assert "2026-10-01" in url and "2026-10-08" in url
+
+
+def test_one_way_dated_link_has_no_return():
+    from src.notify import booking_url
+    assert "through" not in booking_url(make_alert(ret=None))

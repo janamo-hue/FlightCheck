@@ -46,6 +46,20 @@ class Route:
     redeem_above_cents: float = 2.0
     spike_pct: float | None = None
 
+    # City slugs for alaskaair.com route pages. Derived from `name` when
+    # unset: "Seattle to New Orleans" gives seattle / new-orleans.
+    origin_city: str | None = None
+    destination_city: str | None = None
+
+    def cities(self) -> tuple[str, str] | None:
+        if self.origin_city and self.destination_city:
+            return self.origin_city, self.destination_city
+        if " to " not in self.name:
+            return None
+        a, _, b = self.name.partition(" to ")
+        slug = lambda t: t.strip().lower().replace(" ", "-")
+        return slug(a), slug(b)
+
     @property
     def key(self) -> str:
         return f"{self.origin}-{self.destination}"

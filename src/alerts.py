@@ -29,6 +29,7 @@ class Alert:
     all_time_low: bool
     flight_numbers: list[str]
     observations: int
+    cities: tuple[str, str] | None = None
     branded_fare: str | None = None
     earns_points: bool = True
     cents_per_point: float | None = None
@@ -150,6 +151,7 @@ def evaluate(
 
     return Alert(
         kind=kind,
+        cities=route.cities(),
         branded_fare=current.branded_fare,
         earns_points=not (current.branded_fare
                           and "SAVER" in current.branded_fare.upper()),

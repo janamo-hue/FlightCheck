@@ -13,6 +13,7 @@ import argparse
 import html
 import os
 from collections import defaultdict
+from urllib.parse import urlencode
 from datetime import timedelta
 
 from . import alerts, config, store
@@ -78,6 +79,7 @@ def build(days: int = 60) -> str:
         for obs in rows:
             best[obs.pair].append(obs)
 
+        route_cfg = next((r for r in cfg.routes if r.key == key), None)
         ranked = sorted(best.items(), key=lambda kv: min(o.price for o in kv[1]))[:5]
         cards = []
         for pair, obs_list in ranked:
@@ -86,10 +88,21 @@ def build(days: int = 60) -> str:
             lo = min(o.price for o in obs_list)
             depart, _, ret = pair.partition("|")
             when = f"{depart} to {ret}" if ret else f"{depart} one way"
+
+            origin, destination = key.split("-")
+            q = f"Flights from {origin} to {destination} on {depart}"
+            if ret:
+                q += f" through {ret}"
+            gflights = ("https://www.google.com/travel/flights?"
+                        + urlencode({"q": q + " nonstop"}))
+            cities = route_cfg.cities() if route_cfg else None
+            alaska = (f"https://www.alaskaair.com/en/flights-from-{cities[0]}"
+                      f"-to-{cities[1]}") if cities else None
+            links = f'<a href="{gflights}">see these dates</a>' + (
+                f' &middot; <a href="{alaska}">book on Alaska</a>' if alaska else "")
             delta = latest.price - lo
             trend = "at the low" if delta <= 0.5 else f"{delta:,.0f} above the low"
 
-            route_cfg = next((r for r in cfg.routes if r.key == key), None)
             cpp = alerts.cents_per_point(latest.price, route_cfg) if route_cfg else None
             if cpp is None:
                 points = ""
@@ -103,6 +116,7 @@ def build(days: int = 60) -> str:
               <div class="thin">{len(obs_list)} observations, {trend}</div>
               {points}
               {sparkline([(o.observed_at, o.price) for o in obs_list])}
+              <div class="links">{links}</div>
             </div>""")
 
         sections.append(f"<section><h2>{html.escape(name)} "
@@ -126,6 +140,8 @@ def build(days: int = 60) -> str:
   .spark {{ width: 100%; height: 120px; display: block; margin-top: 8px; }}
   .axis {{ display: flex; justify-content: space-between; }}
   .axis span {{ color: #71717a; font-size: 11px; }}
+  .links {{ margin-top: 8px; font-size: 13px; }}
+  .links a {{ color: #2563eb; text-decoration: none; }}
   @media (prefers-color-scheme: dark) {{ .card {{ border-color: #3f3f46; }} }}
 </style></head><body>
 <h1>Fare watch</h1>

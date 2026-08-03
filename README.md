@@ -205,13 +205,42 @@ the archive accumulates the full price curve for every flight from 180 days out
 to departure. That archive is the answer to "when does this route actually
 bottom out", which is worth more than the alerts.
 
-## Report
+## Report and GitHub Pages
 
-`python -m src.report` writes `docs/index.html`: per-route cards for the five
-cheapest date pairs, each with an inline SVG price curve and the low marked.
-No chart library and no build step, so it works from a `file://` URL or from
-GitHub Pages. CI regenerates and commits it on every run. To publish, set
-Settings > Pages to serve from `main` and the `/docs` folder.
+`python -m src.report` renders per-route cards for the five cheapest date
+pairs, each with an inline SVG price curve, the low marked, and booking links.
+No chart library and no build step, so it works from a `file://` URL.
+
+CI publishes it to Pages automatically. The `publish` job rebuilds the page
+after every scan and deploys it as a Pages artifact, so the repo does not
+accumulate a regenerated HTML file every single day the way committing
+`docs/` would. `actions/configure-pages` runs with `enablement: true`, which
+switches Pages on the first time the workflow runs, so there is no manual
+setup in repo settings.
+
+The job checks out `main` rather than the triggering commit, because the scan
+job has already pushed that run's observations and the report needs them.
+
+Set the repo variable `REPORT_URL` to the published address, typically
+`https://<owner>.github.io/<repo>/`, and every alert email links to it.
+
+## Links in alerts
+
+Each alert carries two links, because no single one does both jobs:
+
+- **See these dates** goes to Google Flights for the exact departure and
+  return. It is the only source here that can be pinned to specific dates.
+- **Book on Alaska** goes to `alaskaair.com/en/flights-from-{city}-to-{city}`,
+  a real route page with its own fare calendar. Verified to resolve. It is not
+  date-specific, which is why it complements rather than replaces the first.
+
+City slugs come from the route `name`, so "Seattle to New Orleans" gives
+`seattle` and `new-orleans`. Override with `origin_city` and
+`destination_city` when the derived slug is wrong.
+
+Alaska publishes no dated deep-link format, and an earlier version of this
+tool shipped guessed query parameters for one. That was removed rather than
+risk a link landing on an empty search.
 
 ## Quota
 

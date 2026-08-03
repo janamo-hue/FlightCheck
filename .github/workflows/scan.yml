@@ -43,20 +43,61 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           ALERT_EMAIL_FROM: ${{ vars.ALERT_EMAIL_FROM }}
+          REPORT_URL: ${{ vars.REPORT_URL }}
         run: |
           python -m src.scan \
             ${{ inputs.sweep && '--sweep' || '' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}
-
-      - name: Build report
-        if: ${{ !inputs.dry_run }}
-        run: python -m src.report --out docs/index.html --days 60
 
       - name: Commit price history and report
         if: ${{ !inputs.dry_run }}
         run: |
           git config user.name "fare-scan"
           git config user.email "actions@github.com"
-          git add data/ docs/
+          git add data/
           git diff --staged --quiet || git commit -m "prices $(date -u +%Y-%m-%d)"
           git push
+
+  publish:
+    needs: scan
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      # Check out main rather than the triggering SHA: the scan job has
+      # already pushed today's observations and the report needs them.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Build report
+        run: python -m src.report --out site/index.html --days 60
+
+      # enablement: true turns Pages on the first time this runs, so there is
+      # no manual setup step in repo settings.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
