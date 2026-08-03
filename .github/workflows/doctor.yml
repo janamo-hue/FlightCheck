@@ -1,0 +1,42 @@
+name: doctor
+
+# Manual only. Run this after adding the secrets and before enabling the cron.
+# Costs one Amadeus call per route per probe, so 9 calls at the defaults.
+
+on:
+  workflow_dispatch:
+    inputs:
+      probes:
+        description: "Live probes per route"
+        type: string
+        default: "3"
+      skip_live:
+        description: "Config and credentials only, no API calls"
+        type: boolean
+        default: false
+
+jobs:
+  doctor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Preflight
+        env:
+          AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
+          AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
+          AMADEUS_ENV: ${{ vars.AMADEUS_ENV || 'production' }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          ALERT_EMAIL_FROM: ${{ vars.ALERT_EMAIL_FROM }}
+        run: |
+          python -m src.doctor \
+            --probes ${{ inputs.probes || 3 }} \
+            ${{ inputs.skip_live && '--skip-live' || '' }}

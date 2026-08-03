@@ -115,10 +115,35 @@ chart before trusting a verdict.
    `AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET`, `RESEND_API_KEY`,
    `ALERT_EMAIL_TO`. Add repo *variables* `AMADEUS_ENV` and `ALERT_EMAIL_FROM`.
 
-4. **Edit `routes.yml`**, then check the budget and seed the history:
+4. **Edit `routes.yml`**, then run the preflight before anything else:
 
 ```bash
 pip install -r requirements.txt
+python -m src.doctor --skip-live   # config and credentials, no API calls
+python -m src.doctor               # adds 3 live probes per route
+```
+
+There is also a manual `doctor` workflow in the Actions tab, so you can run it
+against the repo secrets without a local checkout.
+
+The check that matters is **service exists**. A route Alaska does not fly
+nonstop returns no offers, and the scanner logs that at debug level and moves
+on, so the tool would run cleanly forever and never alert. That looks exactly
+like success. The doctor turns it into a failure you can see:
+
+```
+[ FAIL ] Seattle to New Orleans (SEA-MSY): service exists
+         0 of 3 probes returned an offer. Either AS does not fly this route
+         nonstop, or the codes are wrong. This route will never alert.
+```
+
+It also flags codeshares, since `includedAirlineCodes` filters on the
+marketing carrier, and reports cents per point per route so you can sanity
+check the award floors.
+
+Once it comes back clean:
+
+```bash
 python -m src.budget
 python -m src.scan --sweep --dry-run     # prices everything, writes nothing
 python -m src.scan --sweep               # first real run, seeds baselines
