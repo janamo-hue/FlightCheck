@@ -121,6 +121,7 @@ def main(argv=None) -> int:
             currency=offer.currency,
             flight_numbers=offer.flight_numbers,
             observed_at=asof.isoformat(),
+            branded_fare=offer.branded_fare,
         )
         fresh.append(obs)
         log.info("[%d/%d] %s %s %s %s %.0f", i, len(tasks), task.tier,

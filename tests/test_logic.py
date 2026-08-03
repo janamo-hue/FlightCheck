@@ -354,3 +354,19 @@ def test_spike_debounce_flips_direction():
     assert evaluate(r, obs(305), prior, state, later) is None
     # Meaningfully higher: the case for redeeming got stronger, so re-alert.
     assert evaluate(r, obs(400), prior, state, later) is not None
+
+
+def test_saver_fare_is_flagged_as_earning_nothing():
+    o = obs(200)
+    o.branded_fare = "SAVER"
+    prior = [obs(400, 5), obs(400, 3), obs(400, 1)]
+    alert = evaluate(points_route(award_floor_points=25000), o, prior, {}, NOW)
+    assert alert is not None
+    assert alert.earns_points is False
+    assert alert.branded_fare == "SAVER"
+
+
+def test_unbranded_fare_is_assumed_to_earn():
+    prior = [obs(400, 5), obs(400, 3), obs(400, 1)]
+    alert = evaluate(points_route(award_floor_points=25000), obs(200), prior, {}, NOW)
+    assert alert.earns_points is True

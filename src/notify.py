@@ -61,6 +61,8 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
             tags.append(f"{a.drop_pct:.0f}% below the {a.observations}-sample median")
         if a.all_time_low:
             tags.append("all-time low")
+        if not a.earns_points:
+            tags.append(f"{a.branded_fare} fare, earns zero points")
         dates = a.depart + (f" to {a.ret}" if a.ret else " (one way)")
         baseline = f"{a.currency} {a.baseline:,.0f}" if a.baseline else "n/a"
 

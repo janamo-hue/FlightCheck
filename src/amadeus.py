@@ -33,6 +33,20 @@ class Offer:
     flight_numbers: list[str]
     duration: str | None
     seats_left: int | None
+    branded_fare: str | None = None
+    fare_basis: str | None = None
+
+    @property
+    def is_saver(self) -> bool:
+        """Saver fares earn zero Atmos points on tickets issued from June 2026.
+
+        The cheapest offer on a route is very often the Saver, so the fare the
+        scanner tracks is frequently the one that earns nothing. Matching is
+        deliberately loose because the exact branded-fare string Amadeus
+        returns for Alaska has not been verified against a live response;
+        `python -m src.doctor` reports the strings it actually sees.
+        """
+        return bool(self.branded_fare and "SAVER" in self.branded_fare.upper())
 
 
 class Amadeus:
@@ -159,6 +173,16 @@ def _parse_offer(raw: dict) -> Offer:
     carriers = {s["carrierCode"] for s in segments}
     duration = raw["itineraries"][0].get("duration") if raw.get("itineraries") else None
 
+    # Branded fare lives under traveller pricing, one entry per segment. The
+    # outbound segment is what determines the brand for our purposes.
+    branded = fare_basis = None
+    pricings = raw.get("travelerPricings") or []
+    if pricings:
+        details = pricings[0].get("fareDetailsBySegment") or []
+        if details:
+            branded = details[0].get("brandedFare")
+            fare_basis = details[0].get("fareBasis")
+
     return Offer(
         price=float(raw["price"]["grandTotal"]),
         currency=raw["price"]["currency"],
@@ -166,4 +190,6 @@ def _parse_offer(raw: dict) -> Offer:
         flight_numbers=numbers,
         duration=duration,
         seats_left=raw.get("numberOfBookableSeats"),
+        branded_fare=branded,
+        fare_basis=fare_basis,
     )

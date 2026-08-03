@@ -29,6 +29,8 @@ class Alert:
     all_time_low: bool
     flight_numbers: list[str]
     observations: int
+    branded_fare: str | None = None
+    earns_points: bool = True
     cents_per_point: float | None = None
     threshold_cents: float | None = None
     spike_pct: float | None = None
@@ -148,6 +150,9 @@ def evaluate(
 
     return Alert(
         kind=kind,
+        branded_fare=current.branded_fare,
+        earns_points=not (current.branded_fare
+                          and "SAVER" in current.branded_fare.upper()),
         cents_per_point=cpp,
         threshold_cents=route.redeem_above_cents if cpp is not None else None,
         spike_pct=spike,

@@ -161,6 +161,7 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
 
     for route in cfg.routes:
         found, prices, carriers, segment_counts = 0, [], set(), []
+        brands, savers = set(), 0
 
         for depart, ret in probe_dates(route, today, probes):
             try:
@@ -180,6 +181,8 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
                 continue
             found += 1
             prices.append(offer.price)
+            brands.add(offer.branded_fare or offer.fare_basis or "unlabelled")
+            savers += offer.is_saver
             carriers.update(offer.carrier.split(","))
             segment_counts.append(len(offer.flight_numbers))
 
@@ -208,6 +211,15 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
             rep.add(WARN, f"{label}: nonstop filter",
                     "an offer has more segments than legs, which should not "
                     "happen with nonStop=true")
+
+        rep.add(OK if brands != {"unlabelled"} else WARN,
+                f"{label}: fare brands",
+                f"cheapest offers are {', '.join(sorted(brands))}"
+                + (f"; {savers}/{found} match Saver, which earn zero Atmos points"
+                   if savers else "")
+                + ("" if brands != {"unlabelled"} else
+                   ". No brandedFare in the response, so Saver detection will "
+                   "not work on this route."))
 
         if route.award_floor_points:
             cpp = min(prices) / route.award_floor_points * 100

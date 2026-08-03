@@ -152,3 +152,44 @@ def test_successful_call_increments_the_counter(monkeypatch):
     client.cheapest_direct("SEA", "MSY", "2026-10-01")
     client.cheapest_direct("SEA", "MSY", "2026-10-05")
     assert client.calls_made == 2
+
+
+# ------------------------------------------------------------- branded fares
+
+SAVER = json.loads("""
+{"price": {"currency": "USD", "grandTotal": "188.00"},
+ "itineraries": [{"segments": [{"carrierCode": "AS", "number": "490"}]}],
+ "travelerPricings": [{"fareDetailsBySegment": [
+   {"segmentId": "1", "cabin": "ECONOMY", "brandedFare": "SAVER",
+    "fareBasis": "QLZNA0MQ", "class": "Q"}]}]}
+""")
+
+
+def test_branded_fare_and_basis_are_captured():
+    offer = _parse_offer(SAVER)
+    assert offer.branded_fare == "SAVER"
+    assert offer.fare_basis == "QLZNA0MQ"
+
+
+def test_saver_is_detected():
+    assert _parse_offer(SAVER).is_saver is True
+
+
+def test_saver_matching_is_case_and_prefix_tolerant():
+    for label in ("saver", "AS_SAVER", "Saver Fare", "MAIN_SAVER"):
+        variant = json.loads(json.dumps(SAVER))
+        variant["travelerPricings"][0]["fareDetailsBySegment"][0]["brandedFare"] = label
+        assert _parse_offer(variant).is_saver is True, label
+
+
+def test_main_cabin_is_not_a_saver():
+    main = json.loads(json.dumps(SAVER))
+    main["travelerPricings"][0]["fareDetailsBySegment"][0]["brandedFare"] = "MAIN"
+    assert _parse_offer(main).is_saver is False
+
+
+def test_offer_without_traveler_pricing_has_no_brand():
+    offer = _parse_offer(OFFER)
+    assert offer.branded_fare is None
+    # Unknown brand must not be assumed to be a Saver.
+    assert offer.is_saver is False

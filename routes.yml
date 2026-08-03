@@ -57,14 +57,16 @@ routes:
   - name: Seattle to Albuquerque
     origin: SEA
     destination: ABQ
-    award_floor_points: 7500     # verify on the Atmos chart before trusting
+    award_floor_points: 7500     # 1,179 mi, inside the <=1,400 band
     sweep_stride_days: 10
     watchlist_size: 3
 
   - name: Seattle to New Orleans
     origin: SEA
     destination: MSY
-    award_floor_points: 12500    # verify on the Atmos chart before trusting
+    award_floor_points: 10000    # 2,083 mi, 18 mi under the 2,101 boundary.
+                                 # BAND UNVERIFIED: this is a guess for the
+                                 # 1,401-2,100 band. Confirm on the chart.
     sweep_stride_days: 10
     watchlist_size: 3
 

@@ -95,8 +95,35 @@ Two things follow:
   `redeem_above_cents`, so an unaffordable flight with bad point value stays
   quiet.
 
-The floors in `routes.yml` are placeholders. Verify them against the current
-chart before trusting a verdict.
+### Earning: Saver fares are the trap
+
+Atmos earns one point and one status point per mile flown, **excluding Saver
+fares**. Saver tickets issued from mid-2026 for travel from August 2026 earn
+zero redeemable and status points, down from a reduced rate before that.
+
+This matters because the cheapest offer on a route is very often the Saver, so
+the fare this tool tracks is frequently the one that earns nothing. Alerts
+therefore carry the branded fare and say so explicitly when it is a Saver. The
+cheap-long-flight-earns-well intuition from the old distance-based program no
+longer holds at the bottom of the fare ladder.
+
+Detection reads `brandedFare` from the Amadeus response and matches loosely on
+"SAVER". The exact string Alaska returns through the GDS is unverified, so
+`python -m src.doctor` reports the brand strings it actually sees per route.
+Check that line on the first real run and tighten the match if needed.
+
+### Floors currently configured
+
+| route | distance | band | floor |
+| --- | --- | --- | --- |
+| SEA-ABQ | 1,179 mi | up to 1,400 | 7,500 |
+| SEA-MSY | 2,083 mi | 1,401 to 2,100 | 10,000, **unverified** |
+| SEA-MEX | 2,334 mi | connecting | unset |
+
+SEA-MSY sits 18 miles under the 2,101-mile boundary on great-circle distance,
+and airlines use their own mileage figures, so it could fall either side. The
+10,000 figure is a guess at the band price. Confirm both on the chart before
+trusting that route's verdict.
 
 ## Setup
 
