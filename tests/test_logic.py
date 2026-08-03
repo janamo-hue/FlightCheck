@@ -1,4 +1,5 @@
-from datetime import date, datetime, timedelta, timezone
+import itertools
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -6,16 +7,20 @@ from src.alerts import evaluate, record_alert
 from src.config import Route
 from src.planner import (
     mark_priced as planner_mark,
+)
+from src.planner import (
     plan,
     should_sweep,
-    sweep_complete as planner_sweep_complete,
     sweep_tasks,
     watchlist_tasks,
+)
+from src.planner import (
+    sweep_complete as planner_sweep_complete,
 )
 from src.store import Observation
 
 TODAY = date(2026, 8, 2)  # a Sunday
-NOW = datetime(2026, 8, 2, 14, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 2, 14, 0, tzinfo=UTC)
 
 
 def route(**kw) -> Route:
@@ -184,7 +189,7 @@ def test_stride_applies_after_weekday_filter():
     assert len(every_friday) == 24
     gaps = {
         (date.fromisoformat(b.depart) - date.fromisoformat(a.depart)).days
-        for a, b in zip(every_friday, every_friday[1:])
+        for a, b in itertools.pairwise(every_friday)
     }
     assert gaps == {7}
 
@@ -192,7 +197,7 @@ def test_stride_applies_after_weekday_filter():
 def test_stride_unchanged_without_weekday_filter():
     tasks = sweep_tasks(route(sweep_stride_days=4), TODAY)
     departs = [date.fromisoformat(t.depart) for t in tasks]
-    assert {(b - a).days for a, b in zip(departs, departs[1:])} == {4}
+    assert {(b - a).days for a, b in itertools.pairwise(departs)} == {4}
 
 
 # ----------------------------------------------- fixes: resumable sweeps
@@ -256,8 +261,8 @@ def test_pairs_falling_out_of_window_are_dropped_from_backlog():
 # ------------------------------------------------------- fixes: booking link
 
 def test_booking_url_is_google_flights_with_both_dates():
-    from src.notify import booking_url
     from src.alerts import Alert
+    from src.notify import booking_url
     a = Alert(kind="drop", route_name="x", route_key="SEA-BCN", depart="2026-10-01",
               ret="2026-10-11", price=500.0, currency="USD", baseline=600.0,
               drop_pct=16.7, all_time_low=False, flight_numbers=["AS1"],
@@ -413,7 +418,7 @@ def test_unparseable_route_name_yields_no_cities():
 def test_email_contains_both_links_and_the_report_link(monkeypatch):
     import importlib
 
-    import src.notify as notify
+    from src import notify
     monkeypatch.setenv("REPORT_URL", "https://example.github.io/FlightCheck/")
     importlib.reload(notify)
     try:

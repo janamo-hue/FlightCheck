@@ -1,0 +1,26 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "C4", "SIM", "RUF"]
+
+ignore = [
+  # date.today() is deliberate throughout the planner: scheduling is anchored
+  # to the runner's local day, not to an instant, so a tz-aware datetime would
+  # be the wrong type rather than a safer one.
+  "DTZ011",
+  # A single probe or pricing call failing must not abort the run. These are
+  # logged with context and the loop continues by design.
+  "BLE001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["C408"]   # dict(**kw) factories read better than literals here
+# Inline HTML with style attributes does not wrap without hurting readability.
+"src/notify.py" = ["E501"]
+"src/report.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -13,8 +13,8 @@ import argparse
 import html
 import os
 from collections import defaultdict
-from urllib.parse import urlencode
 from datetime import timedelta
+from urllib.parse import urlencode
 
 from . import alerts, config, store
 

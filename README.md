@@ -208,6 +208,29 @@ python -m src.scan --sweep               # first real run, seeds baselines
 Alerts stay quiet for the first few days until each date pair has
 `min_observations` of history. That is intended.
 
+## CI
+
+Four jobs run on every push and pull request:
+
+| job | what it guards |
+| --- | --- |
+| `lint` | `ruff check`. Formatting is checked but advisory. |
+| `test` | Full suite on Python 3.11, 3.12 and 3.13, with a coverage table in the run summary. |
+| `config` | `routes.yml` validates, quota projection is under the cap, report renders. |
+| `workflows` | Every workflow file parses and has a `jobs` block. |
+
+That last job exists because a malformed workflow fails *silently* on GitHub:
+it simply never runs, which looks exactly like nothing having triggered it.
+
+The `config` job runs `python -m src.doctor --config-only`. Fork pull requests
+have no secrets, and their absence is not a failure of the thing being tested,
+so credential checks are skipped there and left to the manual `doctor`
+workflow.
+
+Dependencies carry upper bounds and Dependabot proposes monthly bumps. This
+runs unattended on a cron, so a breaking major release should fail a visible
+PR rather than a Tuesday morning scan.
+
 ## Usage
 
 ```bash
@@ -216,6 +239,7 @@ python -m src.scan --dry-run    # no email, no writes
 python -m src.scan --sweep      # force a full sweep now
 python -m src.scan --limit 20   # cap API calls
 python -m pytest tests -q
+ruff check src tests
 ```
 
 The workflow runs daily at 14:10 UTC and commits `data/` back to the repo.

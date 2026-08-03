@@ -72,7 +72,8 @@ def check_config(rep: Report):
 
     today = date.today()
     monthly = sum(
-        len(planner.sweep_tasks(r, today)) * 4.35 + min(r.watchlist_size, len(planner.sweep_tasks(r, today))) * 30
+        len(planner.sweep_tasks(r, today)) * 4.35
+        + min(r.watchlist_size, len(planner.sweep_tasks(r, today))) * 30
         for r in cfg.routes
     )
     pct = monthly / cfg.monthly_call_quota * 100
@@ -252,6 +253,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-live", action="store_true",
                         help="config and credentials only, no API calls")
+    parser.add_argument("--config-only", action="store_true",
+                        help="validate routes.yml alone. For CI, where secrets "
+                             "are absent by design and their absence is not a "
+                             "failure of the thing being tested.")
     parser.add_argument("--probes", type=int, default=3,
                         help="live probes per route, spread across the window")
     args = parser.parse_args(argv)
@@ -260,9 +265,11 @@ def main(argv=None) -> int:
     print("\nconfig\n" + "-" * 60)
     cfg = check_config(rep)
 
-    print("\ncredentials\n" + "-" * 60)
-    client = check_credentials(rep) if cfg else None
-    check_email(rep)
+    client = None
+    if not args.config_only:
+        print("\ncredentials\n" + "-" * 60)
+        client = check_credentials(rep) if cfg else None
+        check_email(rep)
 
     if cfg and client and not args.skip_live:
         print(f"\nlive service check ({args.probes} probes per route)\n" + "-" * 60)

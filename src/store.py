@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 HISTORY_PATH = os.environ.get("HISTORY_FILE", "data/history.jsonl")
 ARCHIVE_PATH = os.environ.get("ARCHIVE_FILE", "data/archive.jsonl")
@@ -35,7 +35,7 @@ class Observation:
 
 
 def now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def load_history(path: str | None = None) -> list[Observation]:
@@ -56,8 +56,7 @@ def append(observations: list[Observation], path: str | None = None) -> None:
     path = path or HISTORY_PATH
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "a") as fh:
-        for obs in observations:
-            fh.write(json.dumps(asdict(obs), sort_keys=True) + "\n")
+        fh.writelines(json.dumps(asdict(obs), sort_keys=True) + "\n" for obs in observations)
 
 
 def archive(path: str | None = None, archive_path: str | None = None) -> tuple[int, int]:
@@ -82,12 +81,10 @@ def archive(path: str | None = None, archive_path: str | None = None) -> tuple[i
     if departed:
         os.makedirs(os.path.dirname(archive_path) or ".", exist_ok=True)
         with open(archive_path, "a") as fh:
-            for obs in departed:
-                fh.write(json.dumps(asdict(obs), sort_keys=True) + "\n")
+            fh.writelines(json.dumps(asdict(obs), sort_keys=True) + "\n" for obs in departed)
 
     with open(path, "w") as fh:
-        for obs in live:
-            fh.write(json.dumps(asdict(obs), sort_keys=True) + "\n")
+        fh.writelines(json.dumps(asdict(obs), sort_keys=True) + "\n" for obs in live)
 
     return len(live), len(departed)
 

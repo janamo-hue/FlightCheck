@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from .config import Route
 from .store import Observation
@@ -112,7 +112,7 @@ def evaluate(
     state: dict,
     asof: datetime | None = None,
 ) -> Alert | None:
-    asof = asof or datetime.now(timezone.utc)
+    asof = asof or datetime.now(UTC)
     if not prior:
         return None
 

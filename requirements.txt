@@ -1,2 +1,5 @@
-requests>=2.31
-PyYAML>=6.0
+# Pinned with an upper bound: this runs unattended on a cron, so a breaking
+# major release should fail CI on a dependabot PR rather than silently on a
+# Tuesday morning scan.
+requests>=2.31,<3
+PyYAML>=6.0,<7

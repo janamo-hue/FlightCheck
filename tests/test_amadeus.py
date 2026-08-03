@@ -7,8 +7,6 @@ connections and returns multi-segment itineraries.
 
 import json
 
-import pytest
-
 from src.amadeus import Amadeus, _parse_offer
 
 # Shape taken from the Flight Offers Search v2 response: a round trip with a

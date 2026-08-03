@@ -60,7 +60,8 @@ class Route:
         if " to " not in self.name:
             return None
         a, _, b = self.name.partition(" to ")
-        slug = lambda t: t.strip().lower().replace(" ", "-")
+        def slug(t):
+            return t.strip().lower().replace(" ", "-")
         return slug(a), slug(b)
 
     @property

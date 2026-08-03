@@ -1,0 +1,112 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install ruff
+      - run: ruff check src tests
+      - run: ruff format --check --diff src tests
+        continue-on-error: true   # formatting is advisory, not gating
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The scan and doctor workflows pin 3.12. The others are here to catch
+        # syntax and stdlib drift early rather than on a runner image bump.
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Tests
+        run: pytest tests -q --cov=src --cov-report=term-missing --cov-report=xml
+
+      - name: Coverage summary
+        if: matrix.python-version == '3.12'
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+          root = ET.parse("coverage.xml").getroot()
+          print("| module | coverage |")
+          print("| --- | --- |")
+          for cls in sorted(root.iter("class"), key=lambda c: c.get("filename")):
+              rate = float(cls.get("line-rate")) * 100
+              print(f"| {cls.get('filename')} | {rate:.0f}% |")
+          print(f"\n**Total: {float(root.get('line-rate')) * 100:.0f}%**")
+          PY
+
+  config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # No secrets here by design: a fork PR has none, and their absence is not
+      # a failure of the thing under test. --config-only skips the credential
+      # checks that src.doctor runs for real.
+      - name: Validate routes.yml
+        run: python -m src.doctor --config-only
+
+      - name: Quota projection
+        run: python -m src.budget
+
+      - name: Report renders without history
+        run: python -m src.report --out /tmp/index.html
+
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install PyYAML
+
+      # A malformed workflow file fails silently on GitHub: the workflow simply
+      # never runs, which is indistinguishable from nothing having triggered.
+      - name: Workflow YAML parses
+        run: |
+          python - <<'PY'
+          import pathlib, sys, yaml
+          bad = []
+          for path in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+              try:
+                  doc = yaml.safe_load(path.read_text())
+                  assert "jobs" in doc, "no jobs block"
+                  print(f"ok   {path}  jobs: {', '.join(doc['jobs'])}")
+              except Exception as exc:
+                  bad.append(f"{path}: {exc}")
+                  print(f"FAIL {path}: {exc}")
+          sys.exit(1 if bad else 0)
+          PY

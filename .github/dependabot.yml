@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Action major bumps are the likeliest silent breakage: the scan cron would
+  # simply stop, and nothing else here would notice.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly

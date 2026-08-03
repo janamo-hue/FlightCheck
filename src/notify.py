@@ -53,6 +53,7 @@ def alaska_url(alert: Alert) -> str | None:
 def _links(alert: Alert) -> str:
     style = ("display:inline-block;padding:7px 12px;margin:6px 6px 0 0;"
              "border-radius:6px;font-size:13px;text-decoration:none;")
+
     out = [f'<a href="{booking_url(alert)}" '
            f'style="{style}background:#2563eb;color:#fff;font-weight:600;">'
            f'See these dates</a>']

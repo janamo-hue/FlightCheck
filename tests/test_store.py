@@ -1,12 +1,11 @@
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src import store
 from src.alerts import evaluate
 from src.config import Route
 from src.store import Observation
 
-NOW = datetime(2026, 8, 2, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 2, 12, 0, tzinfo=UTC)
 
 
 def route(**kw) -> Route:

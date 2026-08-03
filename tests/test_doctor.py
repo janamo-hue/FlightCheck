@@ -1,4 +1,3 @@
-import pytest
 
 from src import doctor
 from src.amadeus import Offer
@@ -95,7 +94,7 @@ def test_codeshare_segments_are_flagged():
 def test_points_check_reports_cents_per_point():
     rep = doctor.Report()
     doctor.check_live(rep, cfg(route(award_floor_points=12500)), FakeClient(), probes=1)
-    detail = [d for s, c, d in rep.rows if "points check" in c][0]
+    detail = next(d for s, c, d in rep.rows if "points check" in c)
     assert "2.4c per point" in detail   # 300 / 12500 * 100
 
 

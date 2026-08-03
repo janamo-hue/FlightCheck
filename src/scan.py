@@ -31,8 +31,10 @@ def refresh_watchlist(route, history, state, today):
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dry-run", action="store_true", help="price everything, send nothing, write nothing")
-    parser.add_argument("--sweep", action="store_true", help="force a deep sweep regardless of weekday")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="price everything, send nothing, write nothing")
+    parser.add_argument("--sweep", action="store_true",
+                        help="force a deep sweep regardless of weekday")
     parser.add_argument("--limit", type=int, help="override the per-run call budget")
     parser.add_argument("--config", default=None)
     parser.add_argument("-v", "--verbose", action="store_true")
