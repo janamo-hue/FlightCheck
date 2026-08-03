@@ -15,7 +15,7 @@ import os
 from collections import defaultdict
 from datetime import timedelta
 
-from . import config, store
+from . import alerts, config, store
 
 W, H, PAD = 640, 120, 8
 
@@ -88,10 +88,20 @@ def build(days: int = 60) -> str:
             when = f"{depart} to {ret}" if ret else f"{depart} one way"
             delta = latest.price - lo
             trend = "at the low" if delta <= 0.5 else f"{delta:,.0f} above the low"
+
+            route_cfg = next((r for r in cfg.routes if r.key == key), None)
+            cpp = alerts.cents_per_point(latest.price, route_cfg) if route_cfg else None
+            if cpp is None:
+                points = ""
+            else:
+                call = ("redeem" if cpp >= route_cfg.redeem_above_cents else "pay cash")
+                points = (f'<div class="thin">{cpp:.1f}c per point at the '
+                          f'{route_cfg.award_floor_points:,} floor, so {call}</div>')
             cards.append(f"""<div class="card">
               <div class="row"><strong>{html.escape(when)}</strong>
                 <span class="price">{latest.currency} {latest.price:,.0f}</span></div>
               <div class="thin">{len(obs_list)} observations, {trend}</div>
+              {points}
               {sparkline([(o.observed_at, o.price) for o in obs_list])}
             </div>""")
 
@@ -123,7 +133,9 @@ def build(days: int = 60) -> str:
    Amadeus quota {used:,} of {allowed:,} this month.</p>
 {"".join(sections)}
 <p class="thin">Prices are GDS totals from Amadeus and may differ from the
-   airline site. Green dot marks the lowest price observed for that itinerary.</p>
+   airline site. Green dot marks the lowest price observed for that itinerary.
+   Cents per point assumes saver space exists at the route's chart floor, which
+   is the best case rather than a quote.</p>
 </body></html>"""
 
 

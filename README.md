@@ -62,6 +62,42 @@ Both are gated by `min_observations`, so a brand new route stays quiet until it
 has history. After an alert fires, that date pair is silent for
 `debounce_hours` unless the price falls a further `realert_pct`.
 
+## Points: redeem or pay
+
+Atmos Rewards prices Alaska- and Hawaiian-operated awards from a **distance-band
+floor with dynamic pricing above it**. The floor is published; what an award
+actually costs on a given date is not, and no free API exposes it. seats.aero's
+partner API is the realistic source and it needs a paid Pro subscription.
+
+So this tool does not try to quote award prices. It computes the best case
+instead: `cash_price / award_floor_points x 100`, in cents per point. That
+answers "if saver space exists at the chart floor, does redeeming beat paying?"
+which is enough to tell you **when checking award space is worth the trouble**.
+You still do the actual award search by hand on alaskaair.com, but only on the
+dates the tool flags.
+
+Set `award_floor_points` per route from Alaska's North America award chart, and
+`point_value_cents` to your own valuation. Published third-party valuations of
+an Atmos point cluster around 1.5 cents, with Alaska-operated saver economy
+typically landing between 1.3 and 1.6. Leave `award_floor_points` unset to turn
+the analysis off for a route, which is right for connecting itineraries where a
+single distance band does not apply.
+
+Two things follow:
+
+- **Every alert carries a verdict**, redeem or pay cash, from the cents per
+  point. This is a property of the fare, not of why the alert fired: a cheap
+  fare on a route with a low floor is genuinely both a good cash deal and good
+  point value.
+- **`spike_pct` adds an upward trigger.** For cash, a fare rising is not news.
+  For points it is the whole signal, because an expensive cash fare is exactly
+  when burning points pays. Spikes only alert when redeeming would also clear
+  `redeem_above_cents`, so an unaffordable flight with bad point value stays
+  quiet.
+
+The floors in `routes.yml` are placeholders. Verify them against the current
+chart before trusting a verdict.
+
 ## Setup
 
 1. **Amadeus.** Sign up at developers.amadeus.com and create an app. You get

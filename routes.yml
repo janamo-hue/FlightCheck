@@ -37,6 +37,12 @@ defaults:
   debounce_hours: 48       # suppress repeat alerts for the same date pair
   realert_pct: 5           # unless it drops a further this % below last alert
 
+  # Points, for the redeem-or-pay call. See README for where the floor
+  # numbers come from. Unset award_floor_points to switch this off.
+  point_value_cents: 1.5   # what you reckon an Atmos point is worth
+  redeem_above_cents: 2.0  # flag a redemption when the fare beats this
+  spike_pct: 25            # also alert when the fare rises this % above baseline
+
 # Hard ceiling on API calls per run. Sweeps resume next run if truncated.
 daily_call_budget: 120
 
@@ -51,12 +57,14 @@ routes:
   - name: Seattle to Albuquerque
     origin: SEA
     destination: ABQ
+    award_floor_points: 7500     # verify on the Atmos chart before trusting
     sweep_stride_days: 10
     watchlist_size: 3
 
   - name: Seattle to New Orleans
     origin: SEA
     destination: MSY
+    award_floor_points: 12500    # verify on the Atmos chart before trusting
     sweep_stride_days: 10
     watchlist_size: 3
 
@@ -64,5 +72,6 @@ routes:
     origin: SEA
     destination: MEX
     nonstop: false
+    award_floor_points: null     # connecting itinerary, floor not meaningful
     sweep_stride_days: 10
     watchlist_size: 3

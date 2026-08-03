@@ -258,7 +258,7 @@ def test_pairs_falling_out_of_window_are_dropped_from_backlog():
 def test_booking_url_is_google_flights_with_both_dates():
     from src.notify import booking_url
     from src.alerts import Alert
-    a = Alert(route_name="x", route_key="SEA-BCN", depart="2026-10-01",
+    a = Alert(kind="drop", route_name="x", route_key="SEA-BCN", depart="2026-10-01",
               ret="2026-10-11", price=500.0, currency="USD", baseline=600.0,
               drop_pct=16.7, all_time_low=False, flight_numbers=["AS1"],
               observations=5)
@@ -267,3 +267,90 @@ def test_booking_url_is_google_flights_with_both_dates():
     assert "alaskaair" not in url
     for token in ("SEA", "BCN", "2026-10-01", "2026-10-11", "nonstop"):
         assert token.replace("-", "-") in url.replace("%2C", ",").replace("+", " ")
+
+
+# ------------------------------------------------------------------- points
+
+def points_route(**kw):
+    base = dict(award_floor_points=12500, point_value_cents=1.5,
+                redeem_above_cents=2.0, spike_pct=25, drop_pct=15,
+                min_observations=3)
+    base.update(kw)
+    return route(**base)
+
+
+def test_cents_per_point_uses_the_saver_floor():
+    from src.alerts import cents_per_point
+    # $300 against a 12,500 point floor is 2.4 cents per point.
+    assert cents_per_point(300.0, points_route()) == pytest.approx(2.4)
+
+
+def test_no_floor_configured_means_no_valuation():
+    from src.alerts import cents_per_point
+    assert cents_per_point(300.0, points_route(award_floor_points=None)) is None
+
+
+def test_expensive_fare_triggers_a_redeem_alert():
+    prior = [obs(200, 5), obs(210, 3), obs(205, 1)]
+    alert = evaluate(points_route(), obs(320), prior, {}, NOW)
+    assert alert is not None
+    assert alert.kind == "spike"
+    assert alert.verdict == "redeem points"
+    assert alert.cents_per_point == pytest.approx(2.56)
+
+
+def test_cheap_fare_on_an_expensive_floor_says_pay_cash():
+    r = points_route(award_floor_points=25000)
+    prior = [obs(400, 5), obs(400, 3), obs(400, 1)]
+    alert = evaluate(r, obs(200), prior, {}, NOW)
+    assert alert is not None
+    assert alert.kind == "drop"
+    assert alert.verdict == "pay cash"
+    assert alert.cents_per_point == pytest.approx(0.8)
+
+
+def test_redeem_needs_the_threshold_not_just_a_spike():
+    # 1.2c per point is below redeem_above_cents even though the fare rose.
+    r = points_route(award_floor_points=25000, spike_pct=None)
+    prior = [obs(200, 5), obs(200, 3), obs(200, 1)]
+    assert evaluate(r, obs(300), prior, {}, NOW) is None
+
+
+def test_routes_without_a_floor_never_produce_spike_alerts():
+    r = points_route(award_floor_points=None)
+    prior = [obs(200, 5), obs(210, 3), obs(205, 1)]
+    alert = evaluate(r, obs(400), prior, {}, NOW)
+    assert alert is None
+
+
+
+def test_drop_and_redeem_debounce_independently():
+    r = points_route()
+    state = {}
+    prior = [obs(400, 5), obs(400, 3), obs(400, 1)]
+
+    drop = evaluate(r, obs(250), prior, state, NOW)
+    assert drop.kind == "drop"
+    # Cheap AND good point value: both true, and the verdict says so.
+    assert drop.verdict == "redeem points"
+    record_alert(drop, state, NOW)
+
+    # A spike an hour later is a different event and must still fire.
+    later = NOW + timedelta(hours=1)
+    spike = evaluate(r, obs(600), prior, state, later)
+    assert spike is not None and spike.kind == "spike"
+
+
+def test_spike_debounce_flips_direction():
+    r = points_route()
+    state = {}
+    prior = [obs(200, 5), obs(200, 3), obs(200, 1)]
+
+    first = evaluate(r, obs(300), prior, state, NOW)
+    record_alert(first, state, NOW)
+    later = NOW + timedelta(hours=2)
+
+    # Barely higher: still the same signal, stay quiet.
+    assert evaluate(r, obs(305), prior, state, later) is None
+    # Meaningfully higher: the case for redeeming got stronger, so re-alert.
+    assert evaluate(r, obs(400), prior, state, later) is not None

@@ -34,18 +34,30 @@ def booking_url(alert: Alert) -> str:
 
 
 def render(alerts: list[Alert]) -> tuple[str, str]:
-    best = max(alerts, key=lambda a: a.drop_pct or 0)
-    if best.drop_pct:
-        subject = f"Fare drop: {best.route_name} {best.currency} {best.price:,.0f} ({best.drop_pct:.0f}% off)"
+    redeems = [a for a in alerts if a.kind == "spike"]
+    if redeems:
+        best = max(redeems, key=lambda a: a.cents_per_point or 0)
+        subject = (f"Worth points: {best.route_name} "
+                   f"{best.cents_per_point:.1f}c/pt at {best.currency} {best.price:,.0f}")
     else:
-        subject = f"New low: {best.route_name} {best.currency} {best.price:,.0f}"
+        best = max(alerts, key=lambda a: a.drop_pct or 0)
+        if best.drop_pct:
+            subject = (f"Fare drop: {best.route_name} {best.currency} "
+                       f"{best.price:,.0f} ({best.drop_pct:.0f}% off)")
+        else:
+            subject = f"New low: {best.route_name} {best.currency} {best.price:,.0f}"
     if len(alerts) > 1:
         subject += f" +{len(alerts) - 1} more"
 
     rows = []
-    for a in sorted(alerts, key=lambda x: -(x.drop_pct or 0)):
+    for a in sorted(alerts, key=lambda x: (x.kind != "spike", -(x.drop_pct or 0))):
         tags = []
-        if a.drop_pct is not None:
+        if a.kind == "spike":
+            if a.spike_pct is not None:
+                tags.append(f"{a.spike_pct:.0f}% above the median")
+            if a.cents_per_point is not None:
+                tags.append(f"{a.cents_per_point:.1f}c per point at the saver floor")
+        if a.drop_pct is not None and a.drop_pct > 0:
             tags.append(f"{a.drop_pct:.0f}% below the {a.observations}-sample median")
         if a.all_time_low:
             tags.append("all-time low")
@@ -63,7 +75,9 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
               <td style="padding:12px 8px;border-bottom:1px solid #e4e4e7;text-align:right;">
                 <div style="font-size:20px;font-weight:700;">{a.currency} {a.price:,.0f}</div>
                 <div style="color:#71717a;font-size:12px;">baseline {baseline}</div>
-                <div style="color:#15803d;font-size:12px;">{html.escape(", ".join(tags))}</div>
+                <div style="color:{'#b45309' if a.kind == 'redeem' else '#15803d'};font-size:12px;">
+                  {html.escape(", ".join(tags))}</div>
+                <div style="font-size:12px;font-weight:600;">{html.escape(a.verdict or '')}</div>
                 <a href="{booking_url(a)}" style="font-size:12px;">search Google Flights</a>
               </td>
             </tr>"""
@@ -73,7 +87,9 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
       <h2 style="margin:0 0 4px;">Alaska direct fare alerts</h2>
       <p style="color:#71717a;margin:0 0 16px;font-size:13px;">
         Nonstop Alaska-marketed fares only. Prices are GDS totals and may differ
-        slightly from alaskaair.com.
+        slightly from alaskaair.com. Cents per point assumes saver space exists
+        at the route's chart floor, which is the best case, not a quote. Check
+        award space before acting on it.
       </p>
       <table style="width:100%;border-collapse:collapse;">{''.join(rows)}</table>
     </body></html>"""

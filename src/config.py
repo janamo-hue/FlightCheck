@@ -38,6 +38,14 @@ class Route:
     debounce_hours: int = 48
     realert_pct: float = 5.0
 
+    # Points. award_floor_points is the saver starting price for this route's
+    # distance band, read off Alaska's North America award chart. Leave it
+    # unset to disable the redeem/pay analysis for the route.
+    award_floor_points: int | None = None
+    point_value_cents: float = 1.5
+    redeem_above_cents: float = 2.0
+    spike_pct: float | None = None
+
     @property
     def key(self) -> str:
         return f"{self.origin}-{self.destination}"
