@@ -161,7 +161,7 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
 
     for route in cfg.routes:
         found, prices, carriers, segment_counts = 0, [], set(), []
-        brands, savers = set(), 0
+        brands, savers, premiums = set(), 0, []
 
         for depart, ret in probe_dates(route, today, probes):
             try:
@@ -169,7 +169,9 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
                     route.origin, route.destination, depart, ret,
                     carrier=route.carrier, adults=route.adults,
                     currency=route.currency, cabin=route.cabin,
-                    nonstop=route.nonstop)
+                    nonstop=route.nonstop,
+                    exclude_saver=route.exclude_saver,
+                    max_offers=route.max_offers)
             except QuotaExceeded as exc:
                 rep.add(FAIL, "Amadeus quota", str(exc)[:150])
                 return
@@ -182,7 +184,9 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
             found += 1
             prices.append(offer.price)
             brands.add(offer.branded_fare or offer.fare_basis or "unlabelled")
-            savers += offer.is_saver
+            savers += offer.savers_excluded
+            if offer.saver_price is not None:
+                premiums.append(offer.price - offer.saver_price)
             carriers.update(offer.carrier.split(","))
             segment_counts.append(len(offer.flight_numbers))
 
@@ -214,12 +218,24 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
 
         rep.add(OK if brands != {"unlabelled"} else WARN,
                 f"{label}: fare brands",
-                f"cheapest offers are {', '.join(sorted(brands))}"
-                + (f"; {savers}/{found} match Saver, which earn zero Atmos points"
-                   if savers else "")
+                f"tracked offers are {', '.join(sorted(brands))}"
                 + ("" if brands != {"unlabelled"} else
-                   ". No brandedFare in the response, so Saver detection will "
-                   "not work on this route."))
+                   ". No brandedFare in the response, so Saver detection and "
+                   "exclusion cannot work on this route."))
+
+        if route.exclude_saver:
+            if not premiums:
+                rep.add(WARN, f"{label}: Saver exclusion",
+                        "no Saver fares appeared in any probe, so exclusion is "
+                        "either working silently or not matching the brand string")
+            else:
+                avg = sum(premiums) / len(premiums)
+                per_point = (avg / route.distance_miles * 100
+                             if route.distance_miles else None)
+                rep.add(OK, f"{label}: Saver exclusion",
+                        f"{savers} Saver offers skipped across probes; tracked "
+                        f"fare averages {route.currency} {avg:,.0f} above the Saver"
+                        + (f", {per_point:.1f}c per point earned" if per_point else ""))
 
         if route.award_floor_points:
             cpp = min(prices) / route.award_floor_points * 100

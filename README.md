@@ -95,6 +95,35 @@ Two things follow:
   `redeem_above_cents`, so an unaffordable flight with bad point value stays
   quiet.
 
+### Excluding Saver fares
+
+`exclude_saver: true` (the default) makes the scanner track the cheapest
+**non-Saver** fare instead of the cheapest fare overall.
+
+This costs nothing extra. Amadeus has no branded-fare filter on the Flight
+Offers Search endpoint, and the fare-rule flags that come closest live on the
+POST variant and filter on restrictions rather than on the brand. But a single
+call already returns many offers, so `max_offers` pulls a pool and the cheapest
+non-Saver is picked from what we already paid for. Same call count.
+
+Two deliberate behaviours:
+
+- **Offers with no brand label are kept.** Dropping them would silently empty
+  out any route where Amadeus omits `brandedFare`, which is precisely the
+  invisible failure the doctor exists to catch.
+- **If every offer is a Saver, the search reports nothing** rather than
+  quietly falling back to a fare that earns no points.
+
+The Saver price is still recorded for comparison, so alerts can show what the
+exclusion costs: `USD 59 above the Saver at USD 209, 2.8c per point earned`.
+That last figure is the real decision. Saver earns nothing, so the premium buys
+the entire distance-based accrual. Below your `point_value_cents` it is cheaper
+to buy up than to acquire the points any other way; above it, take the Saver
+and buy points elsewhere. Set `distance_miles` per route to get it.
+
+Turn exclusion off per route with `exclude_saver: false` if you only care about
+the cheapest cash fare and not about earning.
+
 ### Earning: Saver fares are the trap
 
 Atmos earns one point and one status point per mile flown, **excluding Saver

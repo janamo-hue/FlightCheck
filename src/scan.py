@@ -97,6 +97,8 @@ def main(argv=None) -> int:
                 currency=task.route.currency,
                 cabin=task.route.cabin,
                 nonstop=task.route.nonstop,
+                exclude_saver=task.route.exclude_saver,
+                max_offers=task.route.max_offers,
             )
         except QuotaExceeded as exc:
             log.error("Amadeus quota exhausted after %d calls: %s", client.calls_made, exc)
@@ -122,6 +124,7 @@ def main(argv=None) -> int:
             flight_numbers=offer.flight_numbers,
             observed_at=asof.isoformat(),
             branded_fare=offer.branded_fare,
+            saver_price=offer.saver_price,
         )
         fresh.append(obs)
         log.info("[%d/%d] %s %s %s %s %.0f", i, len(tasks), task.tier,

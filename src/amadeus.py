@@ -35,6 +35,8 @@ class Offer:
     seats_left: int | None
     branded_fare: str | None = None
     fare_basis: str | None = None
+    saver_price: float | None = None      # cheapest Saver seen, for comparison
+    savers_excluded: int = 0
 
     @property
     def is_saver(self) -> bool:
@@ -98,8 +100,22 @@ class Amadeus:
         currency: str = "USD",
         cabin: str = "ECONOMY",
         nonstop: bool = True,
+        exclude_saver: bool = False,
+        max_offers: int = 20,
     ) -> Offer | None:
-        """Return the cheapest matching offer, or None if the route has no service."""
+        """Cheapest matching offer, or None if the route has no service.
+
+        Saver exclusion happens here rather than through a request parameter.
+        Amadeus offers no branded-fare filter on this endpoint, and the fare
+        rule flags that come closest (noPenaltyFare and friends) are on the
+        POST variant and would filter on restrictions rather than on the
+        brand itself. Since a single call already returns many offers, the
+        cheapest non-Saver can be picked from what we have for free.
+
+        Offers with no brand label are kept. Dropping them would silently
+        empty out any route where Amadeus omits brandedFare, which is exactly
+        the invisible failure the doctor exists to catch.
+        """
         params = {
             "originLocationCode": origin,
             "destinationLocationCode": destination,
@@ -109,18 +125,30 @@ class Amadeus:
             "travelClass": cabin,
             "nonStop": "true" if nonstop else "false",
             "includedAirlineCodes": carrier,
-            "max": 5,
         }
         if ret:
             params["returnDate"] = ret
 
+        params["max"] = max_offers
         data = self._get("/v2/shopping/flight-offers", params)
-        offers = data.get("data") or []
-        if not offers:
+        raw = data.get("data") or []
+        if not raw:
             return None
 
-        best = min(offers, key=lambda o: float(o["price"]["grandTotal"]))
-        return _parse_offer(best)
+        parsed = sorted((_parse_offer(o) for o in raw), key=lambda o: o.price)
+        savers = [o for o in parsed if o.is_saver]
+        saver_price = savers[0].price if savers else None
+
+        pool = [o for o in parsed if not o.is_saver] if exclude_saver else parsed
+        if not pool:
+            # Every offer was a Saver. Report nothing rather than silently
+            # falling back to a fare that earns no points.
+            return None
+
+        best = pool[0]
+        best.saver_price = saver_price
+        best.savers_excluded = len(savers) if exclude_saver else 0
+        return best
 
     # ----------------------------------------------------------------- http
 

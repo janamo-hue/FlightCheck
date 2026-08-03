@@ -441,3 +441,29 @@ def test_dated_link_carries_both_dates():
 def test_one_way_dated_link_has_no_return():
     from src.notify import booking_url
     assert "through" not in booking_url(make_alert(ret=None))
+
+
+def test_saver_premium_and_cost_per_point_earned():
+    a = make_alert(price=268.0, saver_price=209.0, distance_miles=2083)
+    assert a.saver_premium == pytest.approx(59.0)
+    # $59 buys 2,083 points, so 2.8 cents each.
+    assert a.cost_per_point_earned == pytest.approx(2.83, abs=0.01)
+
+
+def test_no_saver_seen_means_no_premium():
+    a = make_alert(saver_price=None)
+    assert a.saver_premium is None and a.cost_per_point_earned is None
+
+
+def test_missing_distance_blocks_the_per_point_maths_only():
+    a = make_alert(price=268.0, saver_price=209.0, distance_miles=None)
+    assert a.saver_premium == pytest.approx(59.0)
+    assert a.cost_per_point_earned is None
+
+
+def test_email_shows_the_saver_premium():
+    from src.notify import render
+    _, body = render([make_alert(price=268.0, saver_price=209.0,
+                                 distance_miles=2083, branded_fare="MAIN")])
+    assert "above the Saver" in body
+    assert "2.8c per point earned" in body

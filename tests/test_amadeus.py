@@ -193,3 +193,75 @@ def test_offer_without_traveler_pricing_has_no_brand():
     assert offer.branded_fare is None
     # Unknown brand must not be assumed to be a Saver.
     assert offer.is_saver is False
+
+
+# ---------------------------------------------------------- saver exclusion
+
+def _offer(price, brand=None):
+    o = json.loads(json.dumps(OFFER))
+    o["price"]["grandTotal"] = f"{price:.2f}"
+    o["travelerPricings"] = [{"fareDetailsBySegment": [{"brandedFare": brand}]}] if brand \
+        else [{"fareDetailsBySegment": [{}]}]
+    return o
+
+
+def _pool(monkeypatch, offers, **kw):
+    client = Amadeus(key="k", secret="s", host="https://example.invalid")
+    client._token, client._token_expires = "tok", 1 << 40
+    monkeypatch.setattr(client.session, "get", lambda *a, **k: _Resp({"data": offers}))
+    return client.cheapest_direct("SEA", "MSY", "2026-10-01", **kw)
+
+
+def test_saver_is_skipped_for_the_next_cheapest(monkeypatch):
+    offers = [_offer(209, "SAVER"), _offer(268, "MAIN"), _offer(410, "FIRST")]
+    result = _pool(monkeypatch, offers, exclude_saver=True)
+    assert result.price == 268.0
+    assert result.branded_fare == "MAIN"
+
+
+def test_saver_price_is_retained_for_comparison(monkeypatch):
+    offers = [_offer(209, "SAVER"), _offer(268, "MAIN")]
+    result = _pool(monkeypatch, offers, exclude_saver=True)
+    assert result.saver_price == 209.0
+    assert result.savers_excluded == 1
+
+
+def test_exclusion_off_still_returns_the_saver(monkeypatch):
+    offers = [_offer(209, "SAVER"), _offer(268, "MAIN")]
+    result = _pool(monkeypatch, offers, exclude_saver=False)
+    assert result.price == 209.0
+    assert result.savers_excluded == 0
+    # The comparison price is still recorded either way.
+    assert result.saver_price == 209.0
+
+
+def test_all_saver_returns_none_rather_than_falling_back(monkeypatch):
+    offers = [_offer(209, "SAVER"), _offer(239, "SAVER")]
+    assert _pool(monkeypatch, offers, exclude_saver=True) is None
+
+
+def test_unlabelled_offers_are_kept_not_dropped(monkeypatch):
+    # Dropping unknown brands would silently empty any route where Amadeus
+    # omits brandedFare, which is the invisible failure we are avoiding.
+    offers = [_offer(209, "SAVER"), _offer(268)]
+    result = _pool(monkeypatch, offers, exclude_saver=True)
+    assert result.price == 268.0
+    assert result.branded_fare is None
+
+
+def test_cheapest_non_saver_wins_regardless_of_response_order(monkeypatch):
+    offers = [_offer(410, "FIRST"), _offer(268, "MAIN"), _offer(209, "SAVER")]
+    assert _pool(monkeypatch, offers, exclude_saver=True).price == 268.0
+
+
+def test_no_saver_present_leaves_the_comparison_empty(monkeypatch):
+    result = _pool(monkeypatch, [_offer(268, "MAIN")], exclude_saver=True)
+    assert result.saver_price is None
+    assert result.savers_excluded == 0
+
+
+def test_max_offers_is_sent_to_the_api(monkeypatch):
+    params: dict = {}
+    client = _client(monkeypatch, params)
+    client.cheapest_direct("SEA", "MSY", "2026-10-01", max_offers=30)
+    assert params["max"] == 30

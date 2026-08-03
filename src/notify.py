@@ -94,6 +94,13 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
             tags.append("all-time low")
         if not a.earns_points:
             tags.append(f"{a.branded_fare} fare, earns zero points")
+        elif a.saver_premium is not None and a.saver_premium > 0:
+            cpe = a.cost_per_point_earned
+            note = (f"{a.currency} {a.saver_premium:,.0f} above the Saver at "
+                    f"{a.currency} {a.saver_price:,.0f}")
+            if cpe is not None:
+                note += f", {cpe:.1f}c per point earned"
+            tags.append(note)
         dates = a.depart + (f" to {a.ret}" if a.ret else " (one way)")
         baseline = f"{a.currency} {a.baseline:,.0f}" if a.baseline else "n/a"
 
@@ -120,7 +127,8 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
       <h2 style="margin:0 0 4px;">Alaska direct fare alerts</h2>
       <p style="color:#71717a;margin:0 0 16px;font-size:13px;">
         Nonstop Alaska-marketed fares only. Prices are GDS totals and may differ
-        slightly from alaskaair.com. Cents per point assumes saver space exists
+        slightly from alaskaair.com. Saver fares are excluded where configured,
+        since they earn no Atmos points. Cents per point assumes saver space exists
         at the route's chart floor, which is the best case, not a quote. Check
         award space before acting on it.
       </p>

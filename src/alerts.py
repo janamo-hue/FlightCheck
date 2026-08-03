@@ -32,6 +32,8 @@ class Alert:
     cities: tuple[str, str] | None = None
     branded_fare: str | None = None
     earns_points: bool = True
+    saver_price: float | None = None
+    distance_miles: int | None = None
     cents_per_point: float | None = None
     threshold_cents: float | None = None
     spike_pct: float | None = None
@@ -49,6 +51,26 @@ class Alert:
             return None
         return ("redeem points" if self.cents_per_point >= self.threshold_cents
                 else "pay cash")
+
+    @property
+    def saver_premium(self) -> float | None:
+        """Extra cost of this fare over the cheapest Saver on the same search."""
+        if self.saver_price is None:
+            return None
+        return self.price - self.saver_price
+
+    @property
+    def cost_per_point_earned(self) -> float | None:
+        """Cents paid per Atmos point earned by buying up from Saver.
+
+        Saver earns nothing, so the premium buys the whole distance-based
+        accrual. Compare against point_value_cents: below it, buying up is
+        cheaper than acquiring the points any other way.
+        """
+        premium = self.saver_premium
+        if premium is None or not self.distance_miles or premium <= 0:
+            return None
+        return premium / self.distance_miles * 100
 
     @property
     def pair(self) -> str:
@@ -153,6 +175,8 @@ def evaluate(
         kind=kind,
         cities=route.cities(),
         branded_fare=current.branded_fare,
+        saver_price=current.saver_price,
+        distance_miles=route.distance_miles,
         earns_points=not (current.branded_fare
                           and "SAVER" in current.branded_fare.upper()),
         cents_per_point=cpp,

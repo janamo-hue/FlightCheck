@@ -9,6 +9,8 @@ defaults:
   cabin: ECONOMY
   carrier: AS              # Alaska Airlines
   nonstop: true
+  exclude_saver: true      # Saver earns zero Atmos points, so skip it
+  max_offers: 20           # offers to pull per call, so a non-Saver exists
 
   # Search window, in days from the run date.
   window_start_days: 14
@@ -57,6 +59,7 @@ routes:
   - name: Seattle to Albuquerque
     origin: SEA
     destination: ABQ
+    distance_miles: 1179
     award_floor_points: 7500     # 1,179 mi, inside the <=1,400 band
     sweep_stride_days: 10
     watchlist_size: 3
@@ -64,6 +67,7 @@ routes:
   - name: Seattle to New Orleans
     origin: SEA
     destination: MSY
+    distance_miles: 2083
     award_floor_points: 10000    # 2,083 mi, 18 mi under the 2,101 boundary.
                                  # BAND UNVERIFIED: this is a guess for the
                                  # 1,401-2,100 band. Confirm on the chart.
@@ -74,6 +78,7 @@ routes:
     origin: SEA
     destination: MEX
     nonstop: false
+    distance_miles: 2334
     award_floor_points: null     # connecting itinerary, floor not meaningful
     sweep_stride_days: 10
     watchlist_size: 3

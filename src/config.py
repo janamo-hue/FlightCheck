@@ -21,6 +21,9 @@ class Route:
     cabin: str = "ECONOMY"
     carrier: str = "AS"
     nonstop: bool = True
+    exclude_saver: bool = True
+    max_offers: int = 20
+    distance_miles: int | None = None      # for the points-earned maths
     window_start_days: int = 14
     window_end_days: int = 180
     sweep_stride_days: int = 4

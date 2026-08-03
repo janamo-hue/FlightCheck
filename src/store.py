@@ -27,6 +27,7 @@ class Observation:
     flight_numbers: list[str]
     observed_at: str
     branded_fare: str | None = None
+    saver_price: float | None = None
 
     @property
     def pair(self) -> str:
