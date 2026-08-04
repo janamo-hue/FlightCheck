@@ -1,0 +1,4 @@
+{"branded_fare": "MAIN", "currency": "USD", "depart": "2026-08-18", "flight_numbers": ["AS327", "AS582"], "observed_at": "2026-08-04T17:37:39.883792+00:00", "price": 553.0, "ret": "2026-08-25", "route": "SEA-ABQ", "saver_price": 453.0}
+{"branded_fare": "MAIN", "currency": "USD", "depart": "2026-08-18", "flight_numbers": ["AS568", "AS569"], "observed_at": "2026-08-04T17:37:39.883792+00:00", "price": 598.0, "ret": "2026-08-25", "route": "SEA-MSY", "saver_price": 488.0}
+{"branded_fare": "MAIN", "currency": "USD", "depart": "2026-08-28", "flight_numbers": ["AS327", "AS582"], "observed_at": "2026-08-04T17:37:39.883792+00:00", "price": 538.0, "ret": "2026-09-04", "route": "SEA-ABQ", "saver_price": 438.0}
+{"branded_fare": "MAIN", "currency": "USD", "depart": "2026-08-28", "flight_numbers": ["AS568", "AS569"], "observed_at": "2026-08-04T17:37:39.883792+00:00", "price": 558.0, "ret": "2026-09-04", "route": "SEA-MSY", "saver_price": 448.0}
