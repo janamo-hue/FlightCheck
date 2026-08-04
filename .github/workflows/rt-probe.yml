@@ -1,0 +1,52 @@
+name: rt-probe
+
+# Manual. Discovers Alaska's round-trip return-date URL parameter by trying
+# candidates against a real runner and checking the prices against known-good
+# values from a screenshot of the actual search. Renders-without-error is not
+# accepted as success: an unrecognised parameter is silently ignored and still
+# produces a plausible one-way grid.
+
+on:
+  workflow_dispatch:
+    inputs:
+      origin:
+        description: Origin IATA
+        default: SEA
+      destination:
+        description: Destination IATA
+        default: ABQ
+      depart:
+        description: Outbound date
+        default: "2026-10-17"
+      ret:
+        description: Return date
+        default: "2026-10-24"
+      expect_main:
+        description: Known round-trip Main total for those dates
+        default: "397"
+      expect_saver:
+        description: Known round-trip Saver total
+        default: "297"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install playwright && playwright install --with-deps chromium
+      - name: Probe round-trip parameters
+        run: |
+          python spikes/alaska/rt_probe.py \
+            --from '${{ inputs.origin }}' --to '${{ inputs.destination }}' \
+            --depart '${{ inputs.depart }}' --ret '${{ inputs.ret }}' \
+            --expect-main '${{ inputs.expect_main }}' \
+            --expect-saver '${{ inputs.expect_saver }}' \
+            | tee probe.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rt-probe-log
+          path: probe.log
