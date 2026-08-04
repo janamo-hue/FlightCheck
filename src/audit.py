@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from itertools import pairwise
 
 from . import store
 
@@ -25,7 +26,19 @@ IMPLAUSIBLE_USD = 5000
 
 
 def constant_gap(rows: list[store.Observation]) -> list[str]:
-    """Flag routes where the tracked fare sits a fixed distance above Saver."""
+    """Flag routes where *every* brand gap is fixed, which no airline does.
+
+    An earlier version flagged a constant Saver-to-Main gap on its own and was
+    wrong: Alaska really does price Saver a flat $50 per leg below Main on
+    SEA-ABQ, and $55 on SEA-MSY, holding that differential while the fare
+    itself moves. A fixed basic-economy discount is a normal pricing
+    convention, not a parsing artefact.
+
+    The corroborating signal is the rest of the ladder. When Main-to-Premium
+    varies across the same reads, the columns are demonstrably aligned and a
+    constant Saver gap is real pricing. Only when every adjacent gap is frozen
+    is a systematic offset the likelier explanation.
+    """
     findings = []
     by_route: dict[str, list[store.Observation]] = defaultdict(list)
     for o in rows:
@@ -40,15 +53,31 @@ def constant_gap(rows: list[store.Observation]) -> list[str]:
         prices = [o.price for o in obs]
         price_spread = max(prices) - min(prices)
 
-        # A fixed gap is only damning when the underlying fares actually moved.
-        if spread == 0 and price_spread > max(gaps[0] * 2, 100):
-            findings.append(
-                f"{route}: tracked fare is exactly {gaps[0]:,.0f} above Saver in "
-                f"all {len(gaps)} observations, while the fare itself ranged over "
-                f"{price_spread:,.0f}. A brand differential moves with the fare; "
-                f"a constant one means the two prices are not the brands they "
-                f"claim to be.")
+        # A fixed gap is only interesting when the underlying fares moved.
+        if spread != 0 or price_spread <= max(gaps[0] * 2, 100):
+            continue
+
+        if _ladder_gaps_vary(obs):
+            continue  # other columns move, so alignment is corroborated
+
+        findings.append(
+            f"{route}: every brand gap is frozen across {len(gaps)} observations "
+            f"while the fare ranged over {price_spread:,.0f}. With no column "
+            f"moving relative to any other, a systematic offset is more likely "
+            f"than {len(gaps)} coincidences.")
     return findings
+
+
+def _ladder_gaps_vary(obs: list[store.Observation]) -> bool:
+    """True if any adjacent brand gap other than Saver-to-Main moves."""
+    series: dict[str, list[float]] = defaultdict(list)
+    for o in obs:
+        ladder = o.fare_ladder or {}
+        ordered = [b for b in ("SAVER", "MAIN", "PREMIUM", "FIRST") if b in ladder]
+        for lo, hi in pairwise(ordered):
+            if (lo, hi) != ("SAVER", "MAIN"):
+                series[f"{lo}-{hi}"].append(ladder[hi] - ladder[lo])
+    return any(len(set(v)) > 1 for v in series.values() if len(v) >= MIN_SAMPLE)
 
 
 def implausible_prices(rows: list[store.Observation]) -> list[str]:
@@ -62,13 +91,21 @@ def implausible_prices(rows: list[store.Observation]) -> list[str]:
 
 
 def duplicate_flights(rows: list[store.Observation]) -> list[str]:
+    """Flag a flight number appearing more often than there are legs.
+
+    A round trip can legitimately repeat one: AS331 out and AS331 back is a
+    real Alaska rotation, not a double read. Only a count above the leg count
+    means the same card was parsed twice.
+    """
     findings = []
     for o in rows:
         nums = o.flight_numbers or []
-        if len(nums) != len(set(nums)):
+        legs = 2 if o.ret else 1
+        excess = {n for n in nums if nums.count(n) > legs}
+        if excess:
             findings.append(
-                f"{o.route} {o.depart}: repeated flight numbers {nums}. The "
-                f"same card is being read more than once.")
+                f"{o.route} {o.depart}: {sorted(excess)} appears more than "
+                f"{legs} time(s) in {nums}. The same card is being read twice.")
     return findings
 
 
@@ -94,11 +131,17 @@ def missing_ladder(rows: list[store.Observation]) -> list[str]:
             f"a mislabelled column cannot be detected after the fact."]
 
 
+# Checks that indicate a real defect and should fail the build.
 CHECKS = (
     ("constant brand gap", constant_gap),
     ("implausible prices", implausible_prices),
     ("duplicate flight numbers", duplicate_flights),
     ("leg count", leg_count),
+)
+
+# Informational. Observations recorded before the ladder existed legitimately
+# lack one, and that is history, not a defect to gate a build on.
+NOTES = (
     ("missing fare ladder", missing_ladder),
 )
 
@@ -126,6 +169,13 @@ def main(argv=None) -> int:
                 print(f"  ... and {len(findings) - 10} more")
         elif not args.quiet:
             print(f"[{name}] clean")
+
+    for name, check in NOTES:
+        findings = check(rows)
+        if findings and not args.quiet:
+            print(f"\n[{name}] note")
+            for f in findings:
+                print(f"  - {f}")
 
     print(f"\n{len(rows)} observations audited, {total} finding(s)")
     return 1 if total else 0

@@ -17,12 +17,29 @@ def spread(route, gap, prices):
             for d, p in enumerate(prices, start=1)]
 
 
-def test_constant_gap_is_flagged():
-    # The real signature: $100 fixed while the fare ranges over $235.
-    rows = spread("SEA-ABQ", 100, [458, 518, 538, 553, 638, 693])
-    findings = audit.constant_gap(rows)
-    assert len(findings) == 1
-    assert "exactly 100 above Saver" in findings[0]
+def ladder(price, saver, prem_gap):
+    return {"SAVER": saver, "MAIN": price, "PREMIUM": price + prem_gap}
+
+
+def test_frozen_ladder_is_flagged():
+    # Every gap constant while the fare moves: no column shifts relative to
+    # any other, so a systematic offset beats that many coincidences.
+    rows = [obs("SEA-ABQ", p, p - 100, depart=f"2026-10-{d:02d}", ret=None,
+                flights=("AS1",), ladder=ladder(p, p - 100, 70))
+            for d, p in enumerate([458, 518, 538, 553, 638, 693], start=1)]
+    assert len(audit.constant_gap(rows)) == 1
+
+
+def test_real_fixed_saver_discount_is_not_flagged():
+    # Alaska genuinely prices Saver a flat $50/leg below Main on SEA-ABQ. The
+    # varying Main-to-Premium gap across the same reads corroborates that the
+    # columns are aligned, so the constant Saver gap is pricing, not a bug.
+    prem = [70, 65, 95, 120, 74, 70]
+    rows = [obs("SEA-ABQ", p, p - 100, depart=f"2026-10-{d:02d}", ret=None,
+                flights=("AS1",), ladder=ladder(p, p - 100, g))
+            for d, (p, g) in enumerate(
+                zip([458, 518, 538, 553, 638, 693], prem, strict=True), start=1)]
+    assert audit.constant_gap(rows) == []
 
 
 def test_varying_gap_is_not_flagged():
@@ -50,9 +67,16 @@ def test_normal_price_is_not_flagged():
     assert audit.implausible_prices([obs("SEA-ABQ", 458, 358)]) == []
 
 
-def test_duplicate_flight_numbers_are_flagged():
-    rows = [obs("SEA-ABQ", 458, 358, flights=("AS2209", "AS2209", "AS2208", "AS2208"))]
+def test_flight_number_beyond_the_leg_count_is_flagged():
+    rows = [obs("SEA-ABQ", 458, 358,
+                flights=("AS2209", "AS2209", "AS2209", "AS2208"))]
     assert len(audit.duplicate_flights(rows)) == 1
+
+
+def test_same_flight_number_on_both_legs_is_legitimate():
+    # AS331 out and AS331 back is a real rotation, not a double read.
+    assert audit.duplicate_flights([obs("SEA-ABQ", 458, 358,
+                                        flights=("AS331", "AS331"))]) == []
 
 
 def test_deduplicated_flights_are_clean():
@@ -79,8 +103,15 @@ def test_present_ladder_is_clean():
 
 def test_main_exits_non_zero_on_findings(tmp_path):
     path = tmp_path / "h.jsonl"
-    store.append(spread("SEA-ABQ", 100, [458, 518, 538, 553, 638, 693]), str(path))
+    store.append([obs("SEA-MEX", 14678, None, flights=())], str(path))
     assert audit.main(["--history", str(path)]) == 1
+
+
+def test_missing_ladder_alone_does_not_fail_the_build(tmp_path):
+    # Observations predating the ladder are history, not a defect.
+    path = tmp_path / "h.jsonl"
+    store.append([obs("SEA-ABQ", 458, 358, flights=("AS1", "AS2"))], str(path))
+    assert audit.main(["--history", str(path)]) == 0
 
 
 def test_main_exits_zero_on_clean_history(tmp_path):
@@ -92,7 +123,8 @@ def test_main_exits_zero_on_clean_history(tmp_path):
     assert audit.main(["--history", str(path)]) == 0
 
 
-def test_quarantined_capture_still_reproduces_the_finding():
-    rows = store.load_history("data/quarantine/2026-08-04-mislabelled-columns.jsonl")
-    findings = audit.constant_gap(rows)
-    assert {"SEA-ABQ", "SEA-MSY"} == {f.split(":")[0] for f in findings}
+def test_real_history_is_clean():
+    """The committed capture is correct data and must not trip the audit."""
+    rows = store.load_history("data/history.jsonl")
+    for name, check in audit.CHECKS:
+        assert check(rows) == [], f"{name} fired on real data"

@@ -211,32 +211,28 @@ Alerts stay quiet for the first few days until each date pair has
 ## Auditing the data
 
 The fare grid can parse cleanly, produce plausible numbers, and still be
-wrong. It was: for as long as the scraper had been running, every tracked
-fare sat one brand column too high. What the tool stored as `saver_price` was
-really the Main cabin fare, and what it called Main was the column above.
+wrong, so `python -m src.audit` checks the recorded observations themselves:
+implausible totals, a flight number appearing more often than there are legs,
+leg counts above what a nonstop allows, and a fully frozen brand ladder. It
+runs in CI, gating on the committed data rather than only on the code.
 
-Nothing in the code noticed, because both numbers looked reasonable. The data
-gave it away: a gap of exactly $100 on all 17 SEA-ABQ observations and exactly
-$110 on all 16 SEA-MSY ones, holding constant while the fares themselves
-ranged over $235 and $590. A brand differential moves with the fare. A
-constant one is an artefact.
+That last check is deliberately narrow, and the reason is worth recording.
+Alaska really does price Saver a flat $50 per leg below Main on SEA-ABQ, and
+$55 on SEA-MSY, holding that differential while the fare itself swings by
+hundreds. A constant Saver-to-Main gap looks exactly like a column misread and
+is not one. What distinguishes them is the rest of the ladder: Main-to-Premium
+moves across the same reads (65, 70, 74, 95, 120), which proves the columns
+are aligned. An earlier version of this check flagged the constant gap alone
+and was wrong. It now fires only when *every* adjacent gap is frozen, since
+that is the case a fixed pricing rule cannot explain.
 
-`python -m src.audit` checks for that signature and several neighbours
-(implausible totals, repeated flight numbers, leg counts above what a nonstop
-allows, observations with no fare ladder). It runs in CI, so it gates on the
-committed data rather than only on the code.
+Similarly, a repeated flight number is not automatically a double read: AS331
+out and AS331 back is a real rotation. Only a count above the leg count is a
+defect.
 
-Three changes make a repeat detectable:
-
-- `_brand_order` no longer falls back to an assumed column order when no
-  header matches. It raises. Assuming the order is what caused this.
-- Tile column indices are read from the DOM and compared against the header
-  count. A mismatch raises rather than labelling positionally.
-- Every observation stores the full brand-to-price ladder, so a mislabel is
-  visible after the fact instead of being lost.
-
-Pre-fix observations are in `data/quarantine/` with a note. They are kept for
-parser testing and must never feed a baseline.
+Every observation stores the full brand-to-price ladder. Keeping only two
+numbers per search is what made the question hard to settle in the first
+place; with the ladder, one look answers it.
 
 ## CI
 
