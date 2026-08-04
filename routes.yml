@@ -50,6 +50,10 @@ daily_call_budget: 120
 
 # Monthly Amadeus allowance. The scanner stops at reserve_pct of this so a
 # busy month cannot silently burn the quota and blank out the rest of it.
+# Scheduled runs per day. The workflow fires at 06:10 and 18:10 Pacific;
+# this only needs to match so the projection below is honest.
+runs_per_day: 2
+
 monthly_call_quota: 2000
 quota_reserve_pct: 95
 

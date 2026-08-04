@@ -74,6 +74,7 @@ class Config:
     routes: list[Route]
     daily_call_budget: int = 70
     monthly_call_quota: int = 2000
+    runs_per_day: int = 1
     quota_reserve_pct: float = 95.0
 
 
@@ -99,5 +100,6 @@ def load(path: str | None = None) -> Config:
         routes=routes,
         daily_call_budget=int(raw.get("daily_call_budget", 70)),
         monthly_call_quota=int(raw.get("monthly_call_quota", 2000)),
+        runs_per_day=int(raw.get("runs_per_day", 1)),
         quota_reserve_pct=float(raw.get("quota_reserve_pct", 95)),
     )

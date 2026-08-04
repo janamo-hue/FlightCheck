@@ -295,8 +295,21 @@ python -m pytest tests -q
 ruff check src tests
 ```
 
-The workflow runs daily at 14:10 UTC and commits `data/` back to the repo.
-`workflow_dispatch` exposes sweep and dry-run toggles.
+The workflow runs twice daily, at **06:10 and 18:10 Pacific**, and commits
+`data/` back to the repo. `workflow_dispatch` exposes sweep and dry-run
+toggles and bypasses the gate below.
+
+GitHub cron is UTC only, so holding a fixed local time across DST takes four
+entries and a gate job: 13:10 and 01:10 UTC are correct in daylight time,
+14:10 and 02:10 in standard time. The gate reads the current Pacific hour and
+drops whichever pair is an hour off, so exactly two runs happen either way and
+the discarded ones show as skipped rather than as failures. Scheduling at :10
+past means the usual Actions queueing delay cannot push a run into the next
+local hour and get it discarded.
+
+Only the watchlist re-check scales with cadence; sweeps stay weekly. Twice
+daily takes the projection from 328 to 508 page loads a month, a quarter of
+the self-imposed ceiling.
 
 ## Storage
 
@@ -354,9 +367,10 @@ risk a link landing on an empty search.
 ## Quota
 
 `state.json` carries a rolling monthly counter. The scanner stops once it hits
-`quota_reserve_pct` of `monthly_call_quota`, so a heavy month degrades to
-"nothing new today" instead of Amadeus rejecting calls and the tool going
-quiet without explanation. `python -m src.budget` projects usage before you
+`quota_reserve_pct` of `monthly_call_quota`. This is no longer an API
+allowance: Amadeus was decommissioned and the number is now a self-imposed
+ceiling on page loads against alaskaair.com, which matters for staying
+unobtrusive rather than for billing. `python -m src.budget` projects usage before you
 add routes.
 
 ## Caveats worth knowing

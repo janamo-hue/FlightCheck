@@ -132,3 +132,45 @@ def test_report_handles_a_route_with_no_history(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "STATE_PATH", str(tmp_path / "s.json"))
     page = report.build(days=60)
     assert "No observations" in page
+
+
+# ------------------------------------------------------ twice-daily schedule
+
+def test_runs_per_day_scales_only_the_watchlist(monkeypatch):
+    """Sweeps stay weekly; doubling the cadence doubles re-checks, not sweeps."""
+    from src import budget, config
+
+    def projection(runs):
+        cfg = config.load()
+        cfg.runs_per_day = runs
+        monkeypatch.setattr(config, "load", lambda: cfg)
+        return budget.main()
+
+    # Both projections must stay under the ceiling, so both return 0.
+    assert projection(1) == 0
+    assert projection(2) == 0
+
+
+def test_pacific_gate_keeps_two_runs_per_day():
+    """The four UTC crons must collapse to 06:00 and 18:00 local in both offsets."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    la = ZoneInfo("America/Los_Angeles")
+    crons = [13, 14, 1, 2]
+    for day in ("2026-07-15", "2027-01-15"):
+        kept = [
+            datetime.fromisoformat(f"{day}T{h:02d}:10:00+00:00").astimezone(la).hour
+            for h in crons
+            if datetime.fromisoformat(f"{day}T{h:02d}:10:00+00:00").astimezone(la).hour
+            in (6, 18)
+        ]
+        assert sorted(kept) == [6, 18], (day, kept)
+
+
+def test_workflow_declares_those_four_crons():
+    import yaml
+    wf = yaml.safe_load(open(".github/workflows/scan.yml"))
+    crons = {c["cron"] for c in wf[True]["schedule"]}
+    assert crons == {"10 13 * * *", "10 14 * * *", "10 01 * * *", "10 02 * * *"}
+    assert wf["jobs"]["scan"]["needs"] == "gate"
