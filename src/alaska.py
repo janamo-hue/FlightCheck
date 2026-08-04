@@ -21,9 +21,10 @@ one per brand column read from ``columnheader-*`` (SAVER, MAIN, PREMIUM, FIRST).
 Because Alaska labels the SAVER column explicitly, Saver exclusion is exact
 here, unlike the brand-string guess the Amadeus client had to make.
 
-Round trips are not supported yet: only the one-way deep link is verified. A
-round-trip request returns None with a warning until the RT=true URL and its
-two-slice selection are captured (tracked in spikes/alaska/README.md).
+Round trips are priced as two one-way loads (outbound + return) and summed:
+Alaska exposes no round-trip results deep link (RT=true falls back to the
+booking home) and prices each direction independently, so the sum is both
+reachable and correct. See spikes/alaska/README.md.
 """
 
 from __future__ import annotations
@@ -166,17 +167,36 @@ class Alaska:
         exclude_saver: bool = False,
         max_offers: int = 20,         # accepted for parity; grid returns all
     ) -> Offer | None:
-        """Cheapest matching fare for the date, or None if unavailable.
+        """Cheapest matching fare, or None if unavailable.
 
         Mirrors the old Amadeus method's contract. ``exclude_saver`` drops the
         SAVER column exactly (Alaska labels it), so the tracked fare is one that
-        earns Atmos points. Offers with no price cell are skipped.
-        """
-        if ret is not None:
-            log.warning("round trips not yet supported by the Alaska scraper "
-                        "(%s-%s %s/%s); skipping", origin, destination, depart, ret)
-            return None
+        earns Atmos points.
 
+        Round trips are priced as outbound one-way + return one-way. Alaska has
+        no round-trip results deep link (the RT=true URL falls back to the
+        booking home) and prices each direction independently with no
+        round-trip-only fares, so the two-one-way sum is both the reachable and
+        the correct total. Costs two page loads instead of one.
+        """
+        out = self._price_oneway(
+            origin, destination, depart, adults=adults, currency=currency,
+            cabin=cabin, nonstop=nonstop, exclude_saver=exclude_saver)
+        if ret is None or out is None:
+            return out
+
+        back = self._price_oneway(
+            destination, origin, ret, adults=adults, currency=currency,
+            cabin=cabin, nonstop=nonstop, exclude_saver=exclude_saver)
+        if back is None:
+            return None
+        return self._combine(out, back)
+
+    def _price_oneway(
+        self, origin: str, destination: str, depart: str, *,
+        adults: int, currency: str, cabin: str, nonstop: bool, exclude_saver: bool,
+    ) -> Offer | None:
+        """Cheapest matching one-way fare for a single date, or None."""
         allowed = set(CABIN_BRANDS.get(cabin.upper(), ("SAVER", "MAIN")))
         page = self._ensure_page()
         self.calls_made += 1
@@ -212,6 +232,27 @@ class Alaska:
             fare_basis=None,
             saver_price=saver_price,
             savers_excluded=len(savers) if exclude_saver else 0,
+        )
+
+    @staticmethod
+    def _combine(out: Offer, back: Offer) -> Offer:
+        """Fold two one-way legs into one round-trip Offer (prices add)."""
+        brand = (out.branded_fare if out.branded_fare == back.branded_fare
+                 else f"{out.branded_fare}/{back.branded_fare}")
+        saver = (out.saver_price + back.saver_price
+                 if out.saver_price is not None and back.saver_price is not None
+                 else None)
+        return Offer(
+            price=round(out.price + back.price, 2),
+            currency=out.currency,
+            carrier="AS",
+            flight_numbers=out.flight_numbers + back.flight_numbers,
+            duration=None,                 # per-leg durations; not meaningful summed
+            seats_left=None,
+            branded_fare=brand,
+            fare_basis=None,
+            saver_price=saver,
+            savers_excluded=out.savers_excluded + back.savers_excluded,
         )
 
     # ------------------------------------------------------------- scrape
