@@ -208,6 +208,33 @@ python -m src.scan --sweep               # first real run, seeds baselines
 Alerts stay quiet for the first few days until each date pair has
 `min_observations` of history. That is intended.
 
+## Round trips are one search
+
+A round trip is priced by a single results load with both dates, not by adding
+two one-way searches:
+
+    /search/results?O=SEA&D=ABQ&OD=2026-10-17&DD=2026-10-24&A=1&RT=true&locale=en-us
+
+`DD` is the return date. It was found by probing candidates against the live
+site (`spikes/alaska/rt_probe.py`); `ID`, `RD`, `RTD`, `OD2`, `ID1`,
+`returnDate` and `IDate` all produced no grid at all.
+
+The earlier version summed two one-ways on the assumption that Alaska prices
+each direction independently. It does not. For SEA-ABQ on 17-24 Oct the
+one-way legs are Saver 179 + 179 and Main 229 + 229, while the real round trip
+is Saver 297 and Main 397: a flat $61 discount across every brand. Every
+observation recorded before this change is high by that offset, which is why
+they sit in `data/archive/` rather than feeding a baseline.
+
+Two things follow beyond correctness. One page load per date pair instead of
+two halves the scrape cost. And brand availability becomes real: Alaska only
+offers brands bookable on that specific pairing, so a return leg with no Saver
+inventory stops yielding a Saver fare that cannot be bought.
+
+Note that an unrecognised URL parameter is silently ignored and still renders
+a plausible one-way grid. That is why the probe accepts a candidate only when
+all four brand prices match a real search, never because the page loaded.
+
 ## Auditing the data
 
 The fare grid can parse cleanly, produce plausible numbers, and still be

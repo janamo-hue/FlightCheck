@@ -150,11 +150,23 @@ class Alaska:
         self.close()
 
     # ------------------------------------------------------------- search
-    def _url(self, origin: str, dest: str, depart: str, adults: int) -> str:
-        return RESULTS_URL + "?" + urlencode({
-            "O": origin, "D": dest, "OD": depart,
-            "A": adults, "RT": "false", "locale": "en-us",
-        })
+    def _url(self, origin: str, dest: str, depart: str, adults: int,
+             ret: str | None = None) -> str:
+        """Results deep link. With a return date this is a round-trip search.
+
+        `DD` is the return date, found by probing candidates against the live
+        site (spikes/alaska/rt_probe.py). An unrecognised name is silently
+        ignored and still renders a plausible one-way grid, so the probe
+        accepted a candidate only when all four brand prices matched a real
+        search rather than when the page merely loaded.
+        """
+        params = {
+            "O": origin, "D": dest, "OD": depart, "A": adults,
+            "RT": "true" if ret else "false", "locale": "en-us",
+        }
+        if ret:
+            params["DD"] = ret
+        return RESULTS_URL + "?" + urlencode(params)
 
     def cheapest_direct(
         self,
@@ -177,34 +189,36 @@ class Alaska:
         SAVER column exactly (Alaska labels it), so the tracked fare is one that
         earns Atmos points.
 
-        Round trips are priced as outbound one-way + return one-way. Alaska has
-        no round-trip results deep link (the RT=true URL falls back to the
-        booking home) and prices each direction independently with no
-        round-trip-only fares, so the two-one-way sum is both the reachable and
-        the correct total. Costs two page loads instead of one.
+        A round trip is one search, not two one-ways added together. The
+        previous version summed them on the claim that Alaska prices each
+        direction independently. It does not: SEA-ABQ on 17-24 Oct is 179 + 179
+        one-way for Saver but 297 round trip, and 229 + 229 versus 397 for
+        Main. Alaska discounts the round trip by a flat 61 across every brand,
+        so the sum overstated every observation this tool ever recorded.
+
+        Pricing the pair together also makes brand availability real. Alaska
+        only offers brands bookable on that specific pairing, so a return leg
+        with no Saver inventory no longer yields a Saver fare that cannot
+        actually be bought.
         """
-        out = self._price_oneway(
-            origin, destination, depart, adults=adults, currency=currency,
-            cabin=cabin, nonstop=nonstop, exclude_saver=exclude_saver)
-        if ret is None or out is None:
-            return out
+        return self._price_search(
+            origin, destination, depart, ret=ret, adults=adults,
+            currency=currency, cabin=cabin, nonstop=nonstop,
+            exclude_saver=exclude_saver)
 
-        back = self._price_oneway(
-            destination, origin, ret, adults=adults, currency=currency,
-            cabin=cabin, nonstop=nonstop, exclude_saver=exclude_saver)
-        if back is None:
-            return None
-        return self._combine(out, back)
-
-    def _price_oneway(
-        self, origin: str, destination: str, depart: str, *,
+    def _price_search(
+        self, origin: str, destination: str, depart: str, *, ret: str | None = None,
         adults: int, currency: str, cabin: str, nonstop: bool, exclude_saver: bool,
     ) -> Offer | None:
-        """Cheapest matching one-way fare for a single date, or None."""
+        """Cheapest matching fare from one search, or None.
+
+        One page load whether or not there is a return date, because the
+        round-trip grid already shows round-trip totals.
+        """
         allowed = set(CABIN_BRANDS.get(cabin.upper(), ("SAVER", "MAIN")))
         page = self._ensure_page()
         self.calls_made += 1
-        page.goto(self._url(origin, destination, depart, adults),
+        page.goto(self._url(origin, destination, depart, adults, ret),
                   wait_until="domcontentloaded")
 
         fares = self._scrape(page, nonstop=nonstop)
@@ -244,31 +258,6 @@ class Alaska:
             savers_excluded=len(savers) if exclude_saver else 0,
         )
 
-    @staticmethod
-    def _combine(out: Offer, back: Offer) -> Offer:
-        """Fold two one-way legs into one round-trip Offer (prices add)."""
-        brand = (out.branded_fare if out.branded_fare == back.branded_fare
-                 else f"{out.branded_fare}/{back.branded_fare}")
-        merged = {b: out.ladder[b] + back.ladder[b]
-                  for b in out.ladder.keys() & back.ladder.keys()}
-        saver = (out.saver_price + back.saver_price
-                 if out.saver_price is not None and back.saver_price is not None
-                 else None)
-        return Offer(
-            price=round(out.price + back.price, 2),
-            currency=out.currency,
-            carrier="AS",
-            flight_numbers=out.flight_numbers + back.flight_numbers,
-            duration=None,                 # per-leg durations; not meaningful summed
-            seats_left=None,
-            branded_fare=brand,
-            fare_basis=None,
-            saver_price=saver,
-            savers_excluded=out.savers_excluded + back.savers_excluded,
-            ladder=merged,
-        )
-
-    # ------------------------------------------------------------- scrape
     def _scrape(self, page, *, nonstop: bool) -> list[_Fare] | None:
         """Parse the fare matrix from the rendered DOM.
 
