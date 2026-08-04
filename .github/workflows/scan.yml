@@ -93,7 +93,7 @@ jobs:
       # create a Pages site ("Resource not accessible by integration"). Pages
       # has to be switched on once by hand, under Settings > Pages, with the
       # source set to GitHub Actions. After that this step is a no-op.
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       - uses: actions/upload-pages-artifact@v3
         with:
