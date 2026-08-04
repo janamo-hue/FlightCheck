@@ -73,12 +73,3 @@ routes:
                                  # 1,401-2,100 band. Confirm on the chart.
     sweep_stride_days: 10
     watchlist_size: 3
-
-  - name: Seattle to Mexico City
-    origin: SEA
-    destination: MEX
-    nonstop: false
-    distance_miles: 2334
-    award_floor_points: null     # connecting itinerary, floor not meaningful
-    sweep_stride_days: 10
-    watchlist_size: 3
