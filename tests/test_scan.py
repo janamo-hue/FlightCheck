@@ -10,7 +10,7 @@ import tempfile
 import pytest
 
 from src import scan, store
-from src.amadeus import Offer
+from src.alaska import Offer
 
 
 class Client:
@@ -38,7 +38,7 @@ def sandbox(monkeypatch):
 
 
 def run(monkeypatch, client, argv=("--limit", "12")):
-    monkeypatch.setattr(scan, "Amadeus", lambda *a, **k: client)
+    monkeypatch.setattr(scan, "Alaska", lambda *a, **k: client)
     return scan.main(list(argv))
 
 

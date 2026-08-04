@@ -146,12 +146,12 @@ def build(days: int = 60) -> str:
 </style></head><body>
 <h1>Fare watch</h1>
 <p class="thin">Last {days} days. Generated {generated}.
-   Amadeus quota {used:,} of {allowed:,} this month.</p>
+   {used:,} of {allowed:,} price checks this month.</p>
 {"".join(sections)}
-<p class="thin">Prices are GDS totals from Amadeus and may differ from the
-   airline site. Green dot marks the lowest price observed for that itinerary.
-   Cents per point assumes saver space exists at the route's chart floor, which
-   is the best case rather than a quote.</p>
+<p class="thin">Prices are read from Alaska's own results page and reflect the
+   fare shown there. Green dot marks the lowest price observed for that
+   itinerary. Cents per point assumes saver space exists at the route's chart
+   floor, which is the best case rather than a quote.</p>
 </body></html>"""
 
 

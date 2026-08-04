@@ -9,7 +9,7 @@ from datetime import date
 
 from . import alerts as alerting
 from . import config, notify, planner, store
-from .amadeus import Amadeus, QuotaExceeded
+from .alaska import Alaska, QuotaExceeded
 
 log = logging.getLogger("scan")
 
@@ -86,7 +86,7 @@ def main(argv=None) -> int:
     log.info("%d calls planned, %d routes sweeping, %d sweep pairs owed",
              len(tasks), len(sweeping), owed)
 
-    client = Amadeus()
+    client = Alaska()
     buckets = store.index(history)
     fresh: list[store.Observation] = []
     triggered: list[alerting.Alert] = []
@@ -108,7 +108,7 @@ def main(argv=None) -> int:
                 max_offers=task.route.max_offers,
             )
         except QuotaExceeded as exc:
-            log.error("Amadeus quota exhausted after %d calls: %s", client.calls_made, exc)
+            log.error("fare provider quota exhausted after %d calls: %s", client.calls_made, exc)
             break
         except Exception:
             failed += 1
