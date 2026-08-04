@@ -35,11 +35,14 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # The Alaska fare source drives a headless browser, so the Chromium
+      # binary must be present. pip installs the playwright package but not the
+      # browser; without this the daily scan fails at the first fare lookup.
+      - name: Install Chromium for the Alaska scraper
+        run: python -m playwright install --with-deps chromium
+
       - name: Scan
         env:
-          AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
-          AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
-          AMADEUS_ENV: ${{ vars.AMADEUS_ENV || 'production' }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           ALERT_EMAIL_FROM: ${{ vars.ALERT_EMAIL_FROM }}
