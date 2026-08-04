@@ -84,6 +84,11 @@ jobs:
       - name: Report renders without history
         run: python -m src.report --out /tmp/index.html
 
+      # The column mislabel produced plausible numbers and sat undetected in
+      # 33 committed observations. This gates on the data, not just the code.
+      - name: Audit recorded observations
+        run: python -m src.audit
+
   workflows:
     runs-on: ubuntu-latest
     steps:

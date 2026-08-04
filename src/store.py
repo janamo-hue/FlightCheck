@@ -28,6 +28,7 @@ class Observation:
     observed_at: str
     branded_fare: str | None = None
     saver_price: float | None = None
+    fare_ladder: dict[str, float] | None = None
 
     @property
     def pair(self) -> str:

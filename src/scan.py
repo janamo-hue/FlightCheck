@@ -135,6 +135,7 @@ def main(argv=None) -> int:
             observed_at=asof.isoformat(),
             branded_fare=offer.branded_fare,
             saver_price=offer.saver_price,
+            fare_ladder=offer.ladder or None,
         )
         fresh.append(obs)
         log.info("[%d/%d] %s %s %s %s %.0f", i, len(tasks), task.tier,

@@ -208,6 +208,36 @@ python -m src.scan --sweep               # first real run, seeds baselines
 Alerts stay quiet for the first few days until each date pair has
 `min_observations` of history. That is intended.
 
+## Auditing the data
+
+The fare grid can parse cleanly, produce plausible numbers, and still be
+wrong. It was: for as long as the scraper had been running, every tracked
+fare sat one brand column too high. What the tool stored as `saver_price` was
+really the Main cabin fare, and what it called Main was the column above.
+
+Nothing in the code noticed, because both numbers looked reasonable. The data
+gave it away: a gap of exactly $100 on all 17 SEA-ABQ observations and exactly
+$110 on all 16 SEA-MSY ones, holding constant while the fares themselves
+ranged over $235 and $590. A brand differential moves with the fare. A
+constant one is an artefact.
+
+`python -m src.audit` checks for that signature and several neighbours
+(implausible totals, repeated flight numbers, leg counts above what a nonstop
+allows, observations with no fare ladder). It runs in CI, so it gates on the
+committed data rather than only on the code.
+
+Three changes make a repeat detectable:
+
+- `_brand_order` no longer falls back to an assumed column order when no
+  header matches. It raises. Assuming the order is what caused this.
+- Tile column indices are read from the DOM and compared against the header
+  count. A mismatch raises rather than labelling positionally.
+- Every observation stores the full brand-to-price ladder, so a mislabel is
+  visible after the fact instead of being lost.
+
+Pre-fix observations are in `data/quarantine/` with a note. They are kept for
+parser testing and must never feed a baseline.
+
 ## CI
 
 Four jobs run on every push and pull request:

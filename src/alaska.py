@@ -31,10 +31,11 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import contextlib
 import logging
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlencode
 
 log = logging.getLogger(__name__)
@@ -73,6 +74,9 @@ class Offer:
     fare_basis: str | None = None
     saver_price: float | None = None
     savers_excluded: int = 0
+    # Every brand seen and its cheapest price. Two numbers per search were not
+    # enough to notice that they were the wrong two.
+    ladder: dict[str, float] = field(default_factory=dict)
 
     @property
     def is_saver(self) -> bool:
@@ -220,8 +224,14 @@ class Alaska:
         if not priceable:
             return None
 
+        ladder: dict[str, float] = {}
+        for f in fares:
+            if f.brand not in ladder or f.price < ladder[f.brand]:
+                ladder[f.brand] = f.price
+
         best = min(priceable, key=lambda f: f.price)
         return Offer(
+            ladder=ladder,
             price=best.price,
             currency=currency,
             carrier="AS",
@@ -239,6 +249,8 @@ class Alaska:
         """Fold two one-way legs into one round-trip Offer (prices add)."""
         brand = (out.branded_fare if out.branded_fare == back.branded_fare
                  else f"{out.branded_fare}/{back.branded_fare}")
+        merged = {b: out.ladder[b] + back.ladder[b]
+                  for b in out.ladder.keys() & back.ladder.keys()}
         saver = (out.saver_price + back.saver_price
                  if out.saver_price is not None and back.saver_price is not None
                  else None)
@@ -253,6 +265,7 @@ class Alaska:
             fare_basis=None,
             saver_price=saver,
             savers_excluded=out.savers_excluded + back.savers_excluded,
+            ladder=merged,
         )
 
     # ------------------------------------------------------------- scrape
@@ -268,10 +281,8 @@ class Alaska:
                                    timeout=self.nav_timeout_ms)
         except Exception:
             body = ""
-            try:
+            with contextlib.suppress(Exception):
                 body = page.inner_text("body").lower()
-            except Exception:
-                pass
             if any(s in body for s in ("no flights", "no results",
                                        "we couldn't find", "unavailable")):
                 return []
@@ -296,16 +307,44 @@ class Alaska:
                         continue
                 elif stops > 0:
                     continue
-            flights = [f.replace(" ", "") for f in _FLIGHT.findall(text)]
+            flights = list(dict.fromkeys(
+                f.replace(" ", "") for f in _FLIGHT.findall(text)))
             dur = self._duration(text)
-            for c, brand in enumerate(brands):
-                tile = card.query_selector(f'[data-testid="valuetile-{n}-{c}"]')
-                if tile is None:
-                    continue
-                price = self._price(tile.inner_text())
+
+            tiles = self._tiles(card, n)
+            if not tiles:
+                continue
+
+            # Positional labelling is only safe when the tiles and the headers
+            # are the same length. When they are not, some column (Saver, on
+            # the grids that produced this repo's data) is not a valuetile at
+            # all, every label shifts, and the recorded "Main" is really the
+            # column above it.
+            if len(tiles) != len(brands):
+                raise RuntimeError(
+                    f"fare grid mismatch on card {n}: {len(brands)} brand "
+                    f"headers {brands} but {len(tiles)} price tiles at indices "
+                    f"{sorted(tiles)}. Refusing to guess which price is which "
+                    f"brand. Run `python -m src.alaska --dump` to inspect.")
+
+            for (idx, price), brand in zip(sorted(tiles.items()), brands, strict=True):
+                del idx
                 if price is not None:
                     fares.append(_Fare(brand, price, flights, dur))
         return fares
+
+    def _tiles(self, card, n: int) -> dict[int, float | None]:
+        """Price tiles on a card, keyed by their actual column index.
+
+        Reading the indices out of the DOM rather than assuming 0..len(brands)
+        is what makes the mismatch above detectable.
+        """
+        found: dict[int, float | None] = {}
+        for tile in card.query_selector_all(f'[data-testid^="valuetile-{n}-"]'):
+            m = re.search(rf"valuetile-{n}-(\d+)$", tile.get_attribute("data-testid") or "")
+            if m:
+                found[int(m.group(1))] = self._price(tile.inner_text())
+        return found
 
     @staticmethod
     def _stops(card, n: int) -> int | None:
@@ -318,12 +357,24 @@ class Alaska:
 
     @staticmethod
     def _brand_order(page) -> list[str]:
+        """Brand columns in DOM order.
+
+        No fallback. The previous version returned KNOWN_BRANDS when no header
+        matched, which meant an unreadable grid was labelled by assumption
+        rather than by observation. That is how every price in this repo came
+        to be one column too high: labels were assigned positionally to tiles
+        that did not line up with them, and nothing complained.
+        """
         order = []
         for h in page.query_selector_all('[data-testid^="columnheader-"]'):
             name = (h.get_attribute("data-testid") or "").split("columnheader-")[-1]
             if name in KNOWN_BRANDS:
                 order.append(name)
-        return order or list(KNOWN_BRANDS)
+        if not order:
+            raise RuntimeError(
+                "no recognisable brand column headers found. The grid markup "
+                "has changed; refusing to guess the column order.")
+        return order
 
     @staticmethod
     def _price(text: str) -> float | None:
