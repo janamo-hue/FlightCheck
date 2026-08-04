@@ -53,8 +53,7 @@ CABIN_BRANDS = {
 }
 
 _PRICE = re.compile(r"\$\s?([0-9][0-9,]*)")
-_FLIGHT = re.compile(r"\b((?:AS|OO)\s?\d{2,4})\b")
-_STOPS = re.compile(r"(\d+)\s*stop", re.I)
+_FLIGHT = re.compile(r"\b((?:AS|OO|QX)\s?\d{2,4})\b")
 
 
 class QuotaExceeded(RuntimeError):
@@ -245,14 +244,17 @@ class Alaska:
                 break
             text = card.inner_text()
             if nonstop:
-                m = _STOPS.search(text)
-                if m and int(m.group(1)) > 0:
-                    continue
-                if "nonstop" not in text.lower() and (m is None):
-                    # No explicit nonstop label and no stop count: keep it, but
-                    # only if the whole itinerary looks like a single segment.
-                    if len(_FLIGHT.findall(text)) > 1:
+                # The stop count is encoded in the card's flight-details testid
+                # (flight-details-N-stops-K). This is the only reliable signal:
+                # connecting cards render "Multiple flights" and never the word
+                # "stop" nor a flight number, so text heuristics miss them.
+                stops = self._stops(card, n)
+                if stops is None:
+                    tl = text.lower()
+                    if "multiple flights" in tl or "nonstop" not in tl:
                         continue
+                elif stops > 0:
+                    continue
             flights = [f.replace(" ", "") for f in _FLIGHT.findall(text)]
             dur = self._duration(text)
             for c, brand in enumerate(brands):
@@ -263,6 +265,15 @@ class Alaska:
                 if price is not None:
                     fares.append(_Fare(brand, price, flights, dur))
         return fares
+
+    @staticmethod
+    def _stops(card, n: int) -> int | None:
+        """Stop count from the flight-details-{n}-stops-{k} testid, or None."""
+        det = card.query_selector(f'[data-testid^="flight-details-{n}-stops-"]')
+        if det is None:
+            return None
+        m = re.search(r"-stops-(\d+)$", det.get_attribute("data-testid") or "")
+        return int(m.group(1)) if m else None
 
     @staticmethod
     def _brand_order(page) -> list[str]:
