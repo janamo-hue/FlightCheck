@@ -264,12 +264,15 @@ bottom out", which is worth more than the alerts.
 pairs, each with an inline SVG price curve, the low marked, and booking links.
 No chart library and no build step, so it works from a `file://` URL.
 
-CI publishes it to Pages automatically. The `publish` job rebuilds the page
-after every scan and deploys it as a Pages artifact, so the repo does not
-accumulate a regenerated HTML file every single day the way committing
-`docs/` would. `actions/configure-pages` runs with `enablement: true`, which
-switches Pages on the first time the workflow runs, so there is no manual
-setup in repo settings.
+CI publishes it to Pages after every scan, deploying it as an artifact so the
+repo does not accumulate a regenerated HTML file every single day the way
+committing `docs/` would.
+
+**One manual step, once:** Settings > Pages, source set to **GitHub Actions**.
+`configure-pages` has an `enablement: true` option that claims to do this for
+you. It does not work here: `GITHUB_TOKEN` cannot create a Pages site and the
+job fails with "Resource not accessible by integration". Verified by a real
+run, not assumed.
 
 The job checks out `main` rather than the triggering commit, because the scan
 job has already pushed that run's observations and the report needs them.

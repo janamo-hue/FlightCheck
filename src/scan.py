@@ -13,6 +13,10 @@ from .amadeus import Amadeus, QuotaExceeded
 
 log = logging.getLogger("scan")
 
+# Individual calls fail for dull reasons: one odd date, a transient 5xx. A run
+# where most of them fail is a different thing and should not exit green.
+MAX_FAILURE_RATE = 0.5
+
 
 def refresh_watchlist(route, history, state, today):
     """Rank this route's live date pairs by cheapest price seen and keep top K."""
@@ -86,6 +90,7 @@ def main(argv=None) -> int:
     buckets = store.index(history)
     fresh: list[store.Observation] = []
     triggered: list[alerting.Alert] = []
+    attempted = failed = 0
 
     for i, task in enumerate(tasks, 1):
         try:
@@ -106,8 +111,11 @@ def main(argv=None) -> int:
             log.error("Amadeus quota exhausted after %d calls: %s", client.calls_made, exc)
             break
         except Exception:
+            failed += 1
             log.exception("failed pricing %s %s", task.route.key, task.pair)
             continue
+        finally:
+            attempted += 1
 
         # Attempted counts as done. Retrying a date with no service every run
         # would never let the cycle close.
@@ -138,8 +146,17 @@ def main(argv=None) -> int:
             triggered.append(alert)
             alerting.record_alert(alert, state, asof)
 
-    log.info("%d observations, %d alerts, %d api calls",
-             len(fresh), len(triggered), client.calls_made)
+    log.info("%d observations, %d alerts, %d api calls, %d/%d calls failed",
+             len(fresh), len(triggered), client.calls_made, failed, attempted)
+
+    # A run where every call blew up used to exit 0, because each failure was
+    # caught, logged and stepped over. Green cron, no data, no alerts, no
+    # signal. Fail loudly instead: a broken credential or a DNS outage should
+    # look broken.
+    if attempted and failed / attempted > MAX_FAILURE_RATE:
+        log.error("%d of %d pricing calls failed, above the %.0f%% tolerance. "
+                  "Not recording this run.", failed, attempted, MAX_FAILURE_RATE * 100)
+        return 2
 
     if args.dry_run:
         notify.send(triggered, dry_run=True)

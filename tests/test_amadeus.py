@@ -7,6 +7,8 @@ connections and returns multi-segment itineraries.
 
 import json
 
+import pytest
+
 from src.amadeus import Amadeus, _parse_offer
 
 # Shape taken from the Flight Offers Search v2 response: a round trip with a
@@ -263,3 +265,31 @@ def test_max_offers_is_sent_to_the_api(monkeypatch):
     client = _client(monkeypatch, params)
     client.cheapest_direct("SEA", "MSY", "2026-10-01", max_offers=30)
     assert params["max"] == 30
+
+
+# --------------------------------------------------------- credential guards
+
+def test_empty_credentials_raise_a_useful_error(monkeypatch):
+    # GitHub sets an unset secret to "" rather than leaving it absent, so the
+    # old os.environ[...] lookup returned "" and failed much later as a
+    # confusing auth or DNS error.
+    monkeypatch.setenv("AMADEUS_CLIENT_ID", "")
+    monkeypatch.setenv("AMADEUS_CLIENT_SECRET", "")
+    with pytest.raises(RuntimeError, match="AMADEUS_CLIENT_ID"):
+        Amadeus()
+
+
+def test_absent_credentials_raise_the_same_way(monkeypatch):
+    monkeypatch.delenv("AMADEUS_CLIENT_ID", raising=False)
+    monkeypatch.delenv("AMADEUS_CLIENT_SECRET", raising=False)
+    with pytest.raises(RuntimeError, match="Secrets and variables"):
+        Amadeus()
+
+
+def test_one_missing_credential_is_named_precisely(monkeypatch):
+    monkeypatch.setenv("AMADEUS_CLIENT_ID", "present")
+    monkeypatch.setenv("AMADEUS_CLIENT_SECRET", "")
+    with pytest.raises(RuntimeError) as exc:
+        Amadeus()
+    assert "AMADEUS_CLIENT_SECRET" in str(exc.value)
+    assert "AMADEUS_CLIENT_ID" not in str(exc.value)

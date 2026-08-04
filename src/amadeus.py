@@ -53,8 +53,17 @@ class Offer:
 
 class Amadeus:
     def __init__(self, key: str | None = None, secret: str | None = None, host: str | None = None):
-        self.key = key or os.environ["AMADEUS_CLIENT_ID"]
-        self.secret = secret or os.environ["AMADEUS_CLIENT_SECRET"]
+        self.key = key or os.environ.get("AMADEUS_CLIENT_ID", "")
+        self.secret = secret or os.environ.get("AMADEUS_CLIENT_SECRET", "")
+        # An unset GitHub secret arrives as an empty string, not as an absent
+        # variable, so os.environ[...] would happily hand back "" and the
+        # failure would surface later as a confusing auth or DNS error.
+        missing = [n for n, v in (("AMADEUS_CLIENT_ID", self.key),
+                                  ("AMADEUS_CLIENT_SECRET", self.secret)) if not v]
+        if missing:
+            raise RuntimeError(
+                f"{' and '.join(missing)} is empty or unset. Add it under "
+                f"Settings > Secrets and variables > Actions.")
         if host:
             self.host = host
         else:

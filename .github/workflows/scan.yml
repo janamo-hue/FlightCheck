@@ -89,11 +89,11 @@ jobs:
       - name: Build report
         run: python -m src.report --out site/index.html --days 60
 
-      # enablement: true turns Pages on the first time this runs, so there is
-      # no manual setup step in repo settings.
+      # enablement: true was tried and does not work: GITHUB_TOKEN cannot
+      # create a Pages site ("Resource not accessible by integration"). Pages
+      # has to be switched on once by hand, under Settings > Pages, with the
+      # source set to GitHub Actions. After that this step is a no-op.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
