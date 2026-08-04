@@ -103,6 +103,21 @@ def build(days: int = 60) -> str:
             delta = latest.price - lo
             trend = "at the low" if delta <= 0.5 else f"{delta:,.0f} above the low"
 
+            fnums = " &middot; ".join(html.escape(f) for f in latest.flight_numbers) or "&mdash;"
+            brand = latest.branded_fare or ""
+            is_saver = "SAVER" in brand.upper()
+            badge = (f'<span class="badge {"saver" if is_saver else "earns"}">'
+                     f'{html.escape(brand)}</span>') if brand else ""
+            if is_saver:
+                note = '<span class="thin">earns 0 Atmos points</span>'
+            elif latest.saver_price is not None:
+                note = (f'<span class="thin">saver {latest.currency} '
+                        f'{latest.saver_price:,.0f} earns 0 pts</span>')
+            else:
+                note = ""
+            flights = (f'<div class="flights">{badge} '
+                       f'<span class="fnums">{fnums}</span> {note}</div>')
+
             cpp = alerts.cents_per_point(latest.price, route_cfg) if route_cfg else None
             if cpp is None:
                 points = ""
@@ -113,6 +128,7 @@ def build(days: int = 60) -> str:
             cards.append(f"""<div class="card">
               <div class="row"><strong>{html.escape(when)}</strong>
                 <span class="price">{latest.currency} {latest.price:,.0f}</span></div>
+              {flights}
               <div class="thin">{len(obs_list)} observations, {trend}</div>
               {points}
               {sparkline([(o.observed_at, o.price) for o in obs_list])}
@@ -142,7 +158,18 @@ def build(days: int = 60) -> str:
   .axis span {{ color: #71717a; font-size: 11px; }}
   .links {{ margin-top: 8px; font-size: 13px; }}
   .links a {{ color: #2563eb; text-decoration: none; }}
-  @media (prefers-color-scheme: dark) {{ .card {{ border-color: #3f3f46; }} }}
+  .flights {{ margin-top: 6px; font-size: 13px; }}
+  .fnums {{ font-variant-numeric: tabular-nums; color: #52525b; }}
+  .badge {{ display: inline-block; padding: 1px 7px; border-radius: 999px;
+            font-size: 11px; font-weight: 600; vertical-align: 1px; }}
+  .badge.saver {{ background: #fef3c7; color: #92400e; }}
+  .badge.earns {{ background: #dcfce7; color: #166534; }}
+  @media (prefers-color-scheme: dark) {{
+    .card {{ border-color: #3f3f46; }}
+    .fnums {{ color: #a1a1aa; }}
+    .badge.saver {{ background: #78350f; color: #fde68a; }}
+    .badge.earns {{ background: #14532d; color: #bbf7d0; }}
+  }}
 </style></head><body>
 <h1>Fare watch</h1>
 <p class="thin">Last {days} days. Generated {generated}.
