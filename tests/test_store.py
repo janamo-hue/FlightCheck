@@ -170,7 +170,8 @@ def test_pacific_gate_keeps_two_runs_per_day():
 
 def test_workflow_declares_those_four_crons():
     import yaml
-    wf = yaml.safe_load(open(".github/workflows/scan.yml"))
+    with open(".github/workflows/scan.yml") as f:
+        wf = yaml.safe_load(f)
     crons = {c["cron"] for c in wf[True]["schedule"]}
     assert crons == {"10 13 * * *", "10 14 * * *", "10 01 * * *", "10 02 * * *"}
     assert wf["jobs"]["scan"]["needs"] == "gate"
