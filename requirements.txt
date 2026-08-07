@@ -2,7 +2,7 @@
 # major release should fail CI on a dependabot PR rather than silently on a
 # Tuesday morning scan.
 requests>=2.34.2,<3
-PyYAML>=6.0,<7
+PyYAML>=6.0.3,<7
 # Fare source is now the Alaska results page, scraped with a headless browser
 # (Amadeus Self-Service shut down 2026-07-17). Needs `playwright install chromium`.
 playwright>=1.40,<2
