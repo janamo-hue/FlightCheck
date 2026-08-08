@@ -236,3 +236,65 @@ def test_email_ok_but_resend_dev_sender_warns(monkeypatch):
     doctor.check_email(rep)
     assert doctor.OK in statuses(rep, "Resend key valid")
     assert doctor.WARN in statuses(rep, "sender domain")
+
+
+class _JsonResp:
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def test_email_send_only_key_is_valid(monkeypatch):
+    # A "Sending access" key 401s on /domains but sends fine, so the preflight
+    # must treat it as valid rather than failing on the least-privilege choice.
+    _email_env(monkeypatch, sender="alerts@my.com")
+    monkeypatch.setattr(
+        doctor.requests, "get",
+        lambda *a, **k: _JsonResp(401, {"name": "restricted_api_key",
+                                        "message": "restricted to only send emails"}))
+    rep = doctor.Report()
+    doctor.check_email(rep)
+    assert doctor.OK in statuses(rep, "Resend key valid")
+    assert rep.failed == 0
+    assert not statuses(rep, "sender domain")   # a real sender must not warn
+
+
+def test_email_send_only_key_still_warns_on_resend_dev_sender(monkeypatch):
+    _email_env(monkeypatch, sender=None)   # onboarding/alerts@resend.dev
+    monkeypatch.setattr(
+        doctor.requests, "get",
+        lambda *a, **k: _JsonResp(401, {"name": "restricted_api_key"}))
+    rep = doctor.Report()
+    doctor.check_email(rep)
+    assert doctor.OK in statuses(rep, "Resend key valid")
+    assert doctor.WARN in statuses(rep, "sender domain")
+
+
+def test_email_other_401_still_fails(monkeypatch):
+    _email_env(monkeypatch, sender="alerts@my.com")
+    monkeypatch.setattr(
+        doctor.requests, "get",
+        lambda *a, **k: _JsonResp(401, {"name": "validation_error",
+                                        "message": "API key is invalid"}))
+    rep = doctor.Report()
+    doctor.check_email(rep)
+    assert doctor.FAIL in statuses(rep, "Resend key valid")
+
+
+def test_email_401_with_unreadable_body_fails(monkeypatch):
+    # A 401 whose body cannot be parsed must fall through to FAIL, not crash.
+    _email_env(monkeypatch, sender="alerts@my.com")
+
+    class _Bad:
+        status_code = 401
+
+        def json(self):
+            raise ValueError("no body")
+
+    monkeypatch.setattr(doctor.requests, "get", lambda *a, **k: _Bad())
+    rep = doctor.Report()
+    doctor.check_email(rep)
+    assert doctor.FAIL in statuses(rep, "Resend key valid")

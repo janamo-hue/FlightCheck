@@ -10,3 +10,4 @@
 2026-08-07 [code] Scraper resilience: bounded retry/reload with jittered backoff, a politeness delay between page loads, browser-crash recovery, and an HTTP-status blocked-vs-unserved classifier in src/alaska.py.
 2026-08-07 [code] Ops/CI hardening: debit page loads on guard-tripped runs; fix rt-probe/doctor workflow script injection via env vars; scan.yml rebase+retry push and least-privilege permissions; .gitignore.
 2026-08-07 [code] DRY: shared page-load projection (planner) and booking-link builders (src/links.py); ARCHIVE_PATH moved under data/archive/. Added parser/resilience/notify/report/doctor/links unit tests.
+2026-08-07 [code] doctor: a Resend "Sending access" key 401s on GET /domains but sends fine; check_email now treats a restricted_api_key 401 as valid instead of a false FAIL.

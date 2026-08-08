@@ -108,6 +108,20 @@ def check_browser(rep: Report) -> Alaska | None:
     return client
 
 
+def _is_send_only_key(resp) -> bool:
+    """Whether a 401 is Resend refusing a send-only key at a management endpoint.
+
+    A "Sending access" key (the least-privilege choice) can POST /emails but
+    cannot read /domains, and Resend names that case exactly. Getting that
+    structured response confirms the key is real and works for sending, which
+    is all the scanner does, so it is not a bad key. Any other 401 is.
+    """
+    try:
+        return resp.json().get("name") == "restricted_api_key"
+    except Exception:
+        return False
+
+
 def check_email(rep: Report) -> None:
     key, to = os.environ.get("RESEND_API_KEY"), os.environ.get("ALERT_EMAIL_TO")
     if not key or not to:
@@ -118,7 +132,8 @@ def check_email(rep: Report) -> None:
 
     sender = os.environ.get("ALERT_EMAIL_FROM", "alerts@resend.dev")
     try:
-        # Read-only endpoint. Validates the key without sending anything.
+        # Read-only endpoint. Validates the key without sending anything, except
+        # for a send-only key, which is handled below.
         resp = requests.get(
             "https://api.resend.com/domains",
             headers={"Authorization": f"Bearer {key}"}, timeout=20)
@@ -127,13 +142,19 @@ def check_email(rep: Report) -> None:
         return
 
     if resp.status_code == 401:
-        rep.add(FAIL, "Resend key valid", "401 unauthorized")
-        return
-    if resp.status_code >= 300:
+        if _is_send_only_key(resp):
+            rep.add(OK, "Resend key valid",
+                    f"send-only key; valid for sending, but its authorized domains "
+                    f"can't be read here, so confirm {sender} is one of them")
+        else:
+            rep.add(FAIL, "Resend key valid", "401 unauthorized")
+            return
+    elif resp.status_code >= 300:
         rep.add(WARN, "Resend key valid", f"unexpected {resp.status_code}")
         return
+    else:
+        rep.add(OK, "Resend key valid", f"sending to {to} from {sender}")
 
-    rep.add(OK, "Resend key valid", f"sending to {to} from {sender}")
     if sender.endswith("resend.dev"):
         rep.add(WARN, "sender domain",
                 "resend.dev only delivers to your own verified address. Verify "
