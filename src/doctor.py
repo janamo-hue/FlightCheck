@@ -19,12 +19,19 @@ from datetime import date, timedelta
 import requests
 
 from . import config, planner
-from .amadeus import Amadeus, QuotaExceeded
+from .alaska import Alaska
 
 IATA = re.compile(r"^[A-Z]{3}$")
+_CARRIER = re.compile(r"^([A-Z]{2})")
 
 OK, WARN, FAIL = "pass", "warn", "FAIL"
 MARK = {OK: "  ok  ", WARN: " warn ", FAIL: " FAIL "}
+
+
+def _carrier_of(flight_number: str) -> str:
+    """Two-letter operating carrier from a flight number, e.g. AS327 -> AS."""
+    m = _CARRIER.match(flight_number or "")
+    return m.group(1) if m else ""
 
 
 class Report:
@@ -71,42 +78,39 @@ def check_config(rep: Report):
                     "unset, so no redeem/pay verdict for this route")
 
     today = date.today()
+    # Sweeps stay weekly (4.35 weeks/month); only the daily watchlist re-check
+    # scales with runs_per_day. This must match src.budget's projection.
     monthly = sum(
         len(planner.sweep_tasks(r, today)) * 4.35
-        + min(r.watchlist_size, len(planner.sweep_tasks(r, today))) * 30
+        + min(r.watchlist_size, len(planner.sweep_tasks(r, today))) * 30 * cfg.runs_per_day
         for r in cfg.routes
     )
     pct = monthly / cfg.monthly_call_quota * 100
     status = FAIL if pct > 100 else WARN if pct > 85 else OK
-    rep.add(status, "monthly quota projection",
-            f"{monthly:,.0f} of {cfg.monthly_call_quota:,} calls ({pct:.0f}%)")
+    rep.add(status, "monthly page-load projection",
+            f"{monthly:,.0f} of {cfg.monthly_call_quota:,} page loads ({pct:.0f}%)")
     return cfg
 
 
-# ---------------------------------------------------------------- credentials
+# -------------------------------------------------------------- fare source
 
 
-def check_credentials(rep: Report) -> Amadeus | None:
-    missing = [k for k in ("AMADEUS_CLIENT_ID", "AMADEUS_CLIENT_SECRET") if not os.environ.get(k)]
-    if missing:
-        rep.add(FAIL, "Amadeus credentials present", f"unset: {', '.join(missing)}")
-        return None
+def check_browser(rep: Report) -> Alaska | None:
+    """Verify the headless browser the Alaska scraper needs is installed.
 
-    env = os.environ.get("AMADEUS_ENV", "production")
-    if env == "test":
-        rep.add(WARN, "Amadeus environment",
-                "test env serves cached, incomplete inventory. Prices from it "
-                "are not trustworthy. Move to production before relying on alerts.")
-    else:
-        rep.add(OK, "Amadeus environment", "production")
-
-    client = Amadeus()
+    Replaces the old Amadeus auth check. The fare source is now alaskaair.com,
+    read with a headless Chromium via Playwright, so a missing browser binary
+    is the failure that would otherwise only surface on the first live scan.
+    The launched client is returned so the live probes below can reuse it.
+    """
+    client = Alaska()
     try:
-        client._auth()
-        rep.add(OK, "Amadeus authenticates", client.host)
+        client._ensure_page()
     except Exception as exc:
-        rep.add(FAIL, "Amadeus authenticates", str(exc)[:200])
+        rep.add(FAIL, "headless browser launches", str(exc)[:200])
+        client.close()
         return None
+    rep.add(OK, "headless browser launches", "Chromium ready")
     return client
 
 
@@ -157,7 +161,7 @@ def probe_dates(route, today: date, n: int) -> list[tuple[str, str | None]]:
     return out
 
 
-def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
+def check_live(rep: Report, cfg, client: Alaska, probes: int) -> None:
     today = date.today()
 
     for route in cfg.routes:
@@ -173,9 +177,6 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
                     nonstop=route.nonstop,
                     exclude_saver=route.exclude_saver,
                     max_offers=route.max_offers)
-            except QuotaExceeded as exc:
-                rep.add(FAIL, "Amadeus quota", str(exc)[:150])
-                return
             except Exception as exc:
                 rep.add(WARN, f"{route.name}: probe {depart}", str(exc)[:150])
                 continue
@@ -184,11 +185,14 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
                 continue
             found += 1
             prices.append(offer.price)
-            brands.add(offer.branded_fare or offer.fare_basis or "unlabelled")
+            brands.add(offer.branded_fare or "unlabelled")
             savers += offer.savers_excluded
             if offer.saver_price is not None:
                 premiums.append(offer.price - offer.saver_price)
-            carriers.update(offer.carrier.split(","))
+            # The grid marks every card as Alaska-marketed, so operating
+            # carrier comes from the flight-number prefix: OO SkyWest, QX
+            # Horizon, both flying as Alaska regional.
+            carriers.update(_carrier_of(n) for n in offer.flight_numbers)
             segment_counts.append(len(offer.flight_numbers))
 
         label = f"{route.name} ({route.key})"
@@ -205,12 +209,12 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
                   f"carriers {','.join(sorted(carriers))}")
         rep.add(OK if found == probes else WARN, f"{label}: service exists", detail)
 
-        stray = carriers - {route.carrier}
+        stray = {c for c in carriers if c and c != route.carrier}
         if stray:
             rep.add(WARN, f"{label}: operating carrier",
-                    f"offers include segments on {','.join(sorted(stray))}. "
-                    f"includedAirlineCodes filters on the marketing carrier, so "
-                    f"these are codeshares.")
+                    f"cheapest fares are operated by {','.join(sorted(stray))}, "
+                    f"a regional partner flying as {route.carrier}. Bookable and "
+                    f"earns points, but flagged so you can eyeball it.")
 
         if route.nonstop and any(c > (1 if route.one_way else 2) for c in segment_counts):
             rep.add(WARN, f"{label}: nonstop filter",
@@ -252,7 +256,7 @@ def check_live(rep: Report, cfg, client: Amadeus, probes: int) -> None:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-live", action="store_true",
-                        help="config and credentials only, no API calls")
+                        help="config, browser and email only, no page loads")
     parser.add_argument("--config-only", action="store_true",
                         help="validate routes.yml alone. For CI, where secrets "
                              "are absent by design and their absence is not a "
@@ -267,14 +271,18 @@ def main(argv=None) -> int:
 
     client = None
     if not args.config_only:
-        print("\ncredentials\n" + "-" * 60)
-        client = check_credentials(rep) if cfg else None
+        print("\nfare source and email\n" + "-" * 60)
+        client = check_browser(rep) if cfg else None
         check_email(rep)
 
-    if cfg and client and not args.skip_live:
-        print(f"\nlive service check ({args.probes} probes per route)\n" + "-" * 60)
-        check_live(rep, cfg, client, args.probes)
-        print(f"\nspent {client.calls_made} Amadeus calls")
+    try:
+        if cfg and client and not args.skip_live:
+            print(f"\nlive service check ({args.probes} probes per route)\n" + "-" * 60)
+            check_live(rep, cfg, client, args.probes)
+            print(f"\nspent {client.calls_made} page loads")
+    finally:
+        if client:
+            client.close()
 
     print("\n" + "=" * 60)
     print(f"{len(rep.rows)} checks, {rep.failed} failed, {rep.warned} warnings")

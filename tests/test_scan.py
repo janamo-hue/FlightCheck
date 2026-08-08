@@ -24,7 +24,7 @@ class Client:
         self.calls_made += 1
         if self.fail_every and self.n % self.fail_every == 0:
             raise ConnectionError("no address associated with hostname")
-        return Offer(300.0, "USD", "AS", ["AS1"], "PT2H", 4)
+        return Offer(300.0, "USD", "AS", ["AS1"], "PT2H")
 
 
 @pytest.fixture

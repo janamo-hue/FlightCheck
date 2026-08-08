@@ -4,8 +4,8 @@ Two tiers:
   sweep     once a week, sample the whole window at sweep_stride_days
   watchlist every run, re-price the K cheapest pairs the last sweep found
 
-This keeps the far end of the window under observation without spending a
-call per date per day, which the free Amadeus quota cannot support.
+This keeps the far end of the window under observation without loading a page
+per date per day, which the self-imposed page-load ceiling could not support.
 """
 
 from __future__ import annotations

@@ -1,7 +1,8 @@
 # Alaska direct-flight price watch configuration.
 #
-# Quota note: Amadeus Self-Service free tier is 2000 Flight Offers Search
-# calls/month. Run `python -m src.budget` to see projected usage for this file.
+# Fares are read by loading alaskaair.com results pages with a headless browser,
+# so there is no paid quota. The ceilings below are self-imposed page-load
+# limits to stay unobtrusive. Run `python -m src.budget` for projected usage.
 
 defaults:
   adults: 1
@@ -45,15 +46,15 @@ defaults:
   redeem_above_cents: 2.0  # flag a redemption when the fare beats this
   spike_pct: 25            # also alert when the fare rises this % above baseline
 
-# Hard ceiling on API calls per run. Sweeps resume next run if truncated.
+# Hard ceiling on page loads per run. Sweeps resume next run if truncated.
 daily_call_budget: 120
 
-# Monthly Amadeus allowance. The scanner stops at reserve_pct of this so a
-# busy month cannot silently burn the quota and blank out the rest of it.
-# Scheduled runs per day. The workflow fires at 06:10 and 18:10 Pacific;
-# this only needs to match so the projection below is honest.
+# Scheduled runs per day. The workflow fires at 06:10 and 18:10 Pacific; this
+# only needs to match so the projection from `python -m src.budget` is honest.
 runs_per_day: 2
 
+# Self-imposed monthly page-load ceiling. The scanner stops at reserve_pct of
+# this so a busy month cannot run away with requests against alaskaair.com.
 monthly_call_quota: 2000
 quota_reserve_pct: 95
 

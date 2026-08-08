@@ -9,7 +9,7 @@ from datetime import date
 
 from . import alerts as alerting
 from . import config, notify, planner, store
-from .alaska import Alaska, QuotaExceeded
+from .alaska import Alaska
 
 log = logging.getLogger("scan")
 
@@ -61,8 +61,9 @@ def main(argv=None) -> int:
 
     budget = args.limit or cfg.daily_call_budget
 
-    # Stop short of the monthly allowance rather than discovering it mid-month
-    # when Amadeus starts rejecting calls and the tool goes quiet.
+    # Stop short of the self-imposed monthly page-load ceiling rather than
+    # blowing past it: the point is to stay unobtrusive against alaskaair.com,
+    # not to ration a paid quota. See src.budget for the projection.
     q = store.quota(state, asof)
     ceiling = int(cfg.monthly_call_quota * cfg.quota_reserve_pct / 100)
     remaining = ceiling - q["calls"]
@@ -107,9 +108,6 @@ def main(argv=None) -> int:
                 exclude_saver=task.route.exclude_saver,
                 max_offers=task.route.max_offers,
             )
-        except QuotaExceeded as exc:
-            log.error("fare provider quota exhausted after %d calls: %s", client.calls_made, exc)
-            break
         except Exception:
             failed += 1
             log.exception("failed pricing %s %s", task.route.key, task.pair)

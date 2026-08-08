@@ -1,4 +1,4 @@
-"""Project monthly Amadeus call usage for the current routes.yml.
+"""Project monthly page-load usage against alaskaair.com for the current routes.yml.
 
 Run: python -m src.budget
 """

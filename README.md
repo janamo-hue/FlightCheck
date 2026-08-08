@@ -1,14 +1,33 @@
-# alaska-watch
+# FlightCheck
 
 Watches nonstop Alaska Airlines fares across a rolling 14-to-180-day window and
-emails you when a price drops past a threshold. Runs entirely on GitHub Actions
-and the Amadeus free tier. No servers, no database, no monthly bill.
+emails you when a price drops past a threshold. Runs entirely on GitHub Actions,
+reading fares from alaskaair.com's own results page with a headless browser. No
+servers, no database, no paid API, no monthly bill.
+
+## Where the prices come from
+
+The fare source is the public results page, loaded in a headless Chromium via
+Playwright and parsed from the rendered DOM. Amadeus Self-Service, the previous
+source, was decommissioned 2026-07-17, and Alaska publishes no free fare API, so
+the tool reads the page a traveller would see. Each nonstop flight renders as a
+`flight-card-N` with a fare cell per brand column (`SAVER`, `MAIN`, `PREMIUM`,
+`FIRST`); the scraper reads the column headers to label prices rather than
+assuming an order, and refuses to guess when the markup does not line up. The
+reverse-engineering trail is in [spikes/alaska/](spikes/alaska/).
+
+Because this runs on GitHub's shared datacenter IPs, bot detection is the open
+risk: Alaska served real fares to a headless browser from a residential IP
+during the spike, but a datacenter IP is more likely to be challenged. The
+`alaska-probe` workflow is a manual + weekly canary that prices one date and
+fails loudly if the grid stops rendering, so a silent block shows up as a red
+run instead of empty scans.
 
 ## How it decides what to price
 
-Amadeus gives 2,000 free Flight Offers Search calls per month. A 14-to-180-day
-window is about 166 departure dates per route, so pricing every date every day
-is off the table by two orders of magnitude. Instead:
+Pricing every date in a 14-to-180-day window every day is off the table: that is
+about 166 departure dates per route, and hammering the site that hard is neither
+necessary nor unobtrusive. Instead there are two tiers:
 
 | tier | cadence | what it covers |
 | --- | --- | --- |
@@ -17,7 +36,7 @@ is off the table by two orders of magnitude. Instead:
 
 The sweep spots slow drift out in the far window. The watchlist catches fast
 drops on the dates you would actually book. Watchlist tasks are queued first, so
-if a run hits the call budget the sweep is what gets truncated, not the dates
+if a run hits the per-run budget the sweep is what gets truncated, not the dates
 you care about.
 
 A sweep that does not fit in one run is **resumed, not dropped**. The pairs
@@ -32,17 +51,17 @@ so `[4]` with a stride of 2 means every second Friday.
 Run `python -m src.budget` before adding routes:
 
 ```
-route                          sweep   daily  per month
-Seattle to San Diego              84       8        605
-Seattle to Boston                 42       8        423
-Seattle to Barcelona              56       8        484
-total                                             1,512
+route                          sweep   per run  per month
+Seattle to Albuquerque            17        3        254
+Seattle to New Orleans            17        3        254
+total                                                508
 
-Amadeus free tier: 2,000/month. Projected use: 76% of quota.
+2 run(s)/day. Page-load budget: 2,000/month. Projected use: 25%.
 ```
 
-Three or four routes fit in the free tier. Past that, widen
-`sweep_stride_days`, shrink `watchlist_size`, or shorten `window_end_days`.
+The 2,000/month figure is a self-imposed ceiling on page loads, not an API
+allowance. If a config projects over it, widen `sweep_stride_days`, shrink
+`watchlist_size`, or shorten `window_end_days`.
 
 ## How it decides what is a drop
 
@@ -100,19 +119,20 @@ Two things follow:
 `exclude_saver: true` (the default) makes the scanner track the cheapest
 **non-Saver** fare instead of the cheapest fare overall.
 
-This costs nothing extra. Amadeus has no branded-fare filter on the Flight
-Offers Search endpoint, and the fare-rule flags that come closest live on the
-POST variant and filter on restrictions rather than on the brand. But a single
-call already returns many offers, so `max_offers` pulls a pool and the cheapest
-non-Saver is picked from what we already paid for. Same call count.
+This costs nothing extra. A single results page already renders every brand
+column, so the cheapest non-Saver is picked from what the page already loaded:
+same page, same cost. And because Alaska labels the `SAVER` column explicitly in
+the grid, the exclusion is exact here, not the loose brand-string match the old
+Amadeus client had to make.
 
 Two deliberate behaviours:
 
-- **Offers with no brand label are kept.** Dropping them would silently empty
-  out any route where Amadeus omits `brandedFare`, which is precisely the
-  invisible failure the doctor exists to catch.
-- **If every offer is a Saver, the search reports nothing** rather than
-  quietly falling back to a fare that earns no points.
+- **If a brand column is unlabelled or the grid does not line up, the scraper
+  raises rather than guess.** A mislabelled column that reads a Premium price as
+  a Main fare is the exact failure the auditing below exists to catch, so the
+  code fails loudly instead of recording a plausible wrong number.
+- **If every fare on the page is a Saver, the search reports nothing** rather
+  than quietly falling back to a fare that earns no points.
 
 The Saver price is still recorded for comparison, so alerts can show what the
 exclusion costs: `USD 59 above the Saver at USD 209, 2.8c per point earned`.
@@ -128,18 +148,14 @@ the cheapest cash fare and not about earning.
 
 Atmos earns one point and one status point per mile flown, **excluding Saver
 fares**. Saver tickets issued from mid-2026 for travel from August 2026 earn
-zero redeemable and status points, down from a reduced rate before that.
+zero redeemable and status points.
 
 This matters because the cheapest offer on a route is very often the Saver, so
 the fare this tool tracks is frequently the one that earns nothing. Alerts
 therefore carry the branded fare and say so explicitly when it is a Saver. The
-cheap-long-flight-earns-well intuition from the old distance-based program no
-longer holds at the bottom of the fare ladder.
-
-Detection reads `brandedFare` from the Amadeus response and matches loosely on
-"SAVER". The exact string Alaska returns through the GDS is unverified, so
-`python -m src.doctor` reports the brand strings it actually sees per route.
-Check that line on the first real run and tighten the match if needed.
+brand comes straight from the grid's column header, so it is exact rather than
+inferred; `python -m src.doctor` still reports the brand strings it sees per
+route as a sanity check.
 
 ### Floors currently configured
 
@@ -147,66 +163,11 @@ Check that line on the first real run and tighten the match if needed.
 | --- | --- | --- | --- |
 | SEA-ABQ | 1,179 mi | up to 1,400 | 7,500 |
 | SEA-MSY | 2,083 mi | 1,401 to 2,100 | 10,000, **unverified** |
-| SEA-MEX | 2,334 mi | connecting | unset |
 
 SEA-MSY sits 18 miles under the 2,101-mile boundary on great-circle distance,
 and airlines use their own mileage figures, so it could fall either side. The
 10,000 figure is a guess at the band price. Confirm both on the chart before
 trusting that route's verdict.
-
-## Setup
-
-1. **Amadeus.** Sign up at developers.amadeus.com and create an app. You get
-   test keys immediately, but the test environment serves cached and incomplete
-   inventory, so it is only good for wiring things up. Move the app to
-   production for real fares. The free 2,000 calls/month applies in production;
-   I'm not certain whether the current flow requires a card on file before the
-   free quota unlocks, so check that when you sign up. Set `AMADEUS_ENV=test`
-   while developing.
-
-2. **Resend.** Get an API key. Verify a sending domain, or send from
-   `onboarding@resend.dev` to yourself while testing.
-
-3. **Repo secrets** (Settings → Secrets and variables → Actions):
-   `AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET`, `RESEND_API_KEY`,
-   `ALERT_EMAIL_TO`. Add repo *variables* `AMADEUS_ENV` and `ALERT_EMAIL_FROM`.
-
-4. **Edit `routes.yml`**, then run the preflight before anything else:
-
-```bash
-pip install -r requirements.txt
-python -m src.doctor --skip-live   # config and credentials, no API calls
-python -m src.doctor               # adds 3 live probes per route
-```
-
-There is also a manual `doctor` workflow in the Actions tab, so you can run it
-against the repo secrets without a local checkout.
-
-The check that matters is **service exists**. A route Alaska does not fly
-nonstop returns no offers, and the scanner logs that at debug level and moves
-on, so the tool would run cleanly forever and never alert. That looks exactly
-like success. The doctor turns it into a failure you can see:
-
-```
-[ FAIL ] Seattle to New Orleans (SEA-MSY): service exists
-         0 of 3 probes returned an offer. Either AS does not fly this route
-         nonstop, or the codes are wrong. This route will never alert.
-```
-
-It also flags codeshares, since `includedAirlineCodes` filters on the
-marketing carrier, and reports cents per point per route so you can sanity
-check the award floors.
-
-Once it comes back clean:
-
-```bash
-python -m src.budget
-python -m src.scan --sweep --dry-run     # prices everything, writes nothing
-python -m src.scan --sweep               # first real run, seeds baselines
-```
-
-Alerts stay quiet for the first few days until each date pair has
-`min_observations` of history. That is intended.
 
 ## Round trips are one search
 
@@ -216,15 +177,15 @@ two one-way searches:
     /search/results?O=SEA&D=ABQ&OD=2026-10-17&DD=2026-10-24&A=1&RT=true&locale=en-us
 
 `DD` is the return date. It was found by probing candidates against the live
-site (`spikes/alaska/rt_probe.py`); `ID`, `RD`, `RTD`, `OD2`, `ID1`,
-`returnDate` and `IDate` all produced no grid at all.
+site ([spikes/alaska/rt_probe.py](spikes/alaska/rt_probe.py)); `ID`, `RD`,
+`RTD`, `OD2`, `ID1`, `returnDate` and `IDate` all produced no round-trip grid.
 
-The earlier version summed two one-ways on the assumption that Alaska prices
+An earlier version summed two one-ways on the assumption that Alaska prices
 each direction independently. It does not. For SEA-ABQ on 17-24 Oct the
 one-way legs are Saver 179 + 179 and Main 229 + 229, while the real round trip
 is Saver 297 and Main 397: a flat $61 discount across every brand. Every
 observation recorded before this change is high by that offset, which is why
-they sit in `data/archive/` rather than feeding a baseline.
+they sit in [data/archive/](data/archive/) rather than feeding a baseline.
 
 Two things follow beyond correctness. One page load per date pair instead of
 two halves the scrape cost. And brand availability becomes real: Alaska only
@@ -261,6 +222,63 @@ Every observation stores the full brand-to-price ladder. Keeping only two
 numbers per search is what made the question hard to settle in the first
 place; with the ladder, one look answers it.
 
+## Setup
+
+1. **Install the scraper's browser.** The fare source drives a headless
+   Chromium, so the browser binary has to be present in addition to the Python
+   package:
+
+   ```bash
+   pip install -r requirements.txt
+   python -m playwright install chromium
+   ```
+
+2. **Confirm the scraper still gets fares from a cloud IP.** This is the one
+   thing the whole design rests on. Run the `alaska-probe` workflow from the
+   Actions tab (or push a change to `src/alaska.py`, which triggers it), and
+   check it prices a date. It also runs weekly as a canary.
+
+3. **Resend.** Get an API key. Verify a sending domain, or send from
+   `onboarding@resend.dev` to yourself while testing.
+
+4. **Repo secrets** (Settings → Secrets and variables → Actions):
+   `RESEND_API_KEY`, `ALERT_EMAIL_TO`. Add repo *variables* `ALERT_EMAIL_FROM`
+   and, once Pages is live, `REPORT_URL`. No fare-source credentials are needed.
+
+5. **Edit `routes.yml`**, then run the preflight before anything else:
+
+```bash
+python -m src.doctor --config-only   # routes.yml alone, no browser, no email
+python -m src.doctor --skip-live     # adds the browser and email checks
+python -m src.doctor                 # adds 3 live probes per route
+```
+
+The check that matters is **service exists**. A route Alaska does not fly
+nonstop returns no fares, and the scanner logs that at debug level and moves
+on, so the tool would run cleanly forever and never alert. That looks exactly
+like success. The doctor turns it into a failure you can see:
+
+```
+[ FAIL ] Seattle to New Orleans (SEA-MSY): service exists
+         0 of 3 probes returned an offer. Either AS does not fly this route
+         nonstop, or the codes are wrong. This route will never alert.
+```
+
+It also flags regional operating carriers (Horizon `QX`, SkyWest `OO`) flying
+as Alaska, and reports cents per point per route so you can sanity check the
+award floors.
+
+Once it comes back clean:
+
+```bash
+python -m src.budget
+python -m src.scan --sweep --dry-run     # prices everything, writes nothing
+python -m src.scan --sweep               # first real run, seeds baselines
+```
+
+Alerts stay quiet for the first few days until each date pair has
+`min_observations` of history. That is intended.
+
 ## CI
 
 Four jobs run on every push and pull request:
@@ -269,16 +287,16 @@ Four jobs run on every push and pull request:
 | --- | --- |
 | `lint` | `ruff check`. Formatting is checked but advisory. |
 | `test` | Full suite on Python 3.11, 3.12 and 3.13, with a coverage table in the run summary. |
-| `config` | `routes.yml` validates, quota projection is under the cap, report renders. |
+| `config` | `routes.yml` validates, page-load projection is under the ceiling, report renders, committed data audits clean. |
 | `workflows` | Every workflow file parses and has a `jobs` block. |
 
 That last job exists because a malformed workflow fails *silently* on GitHub:
 it simply never runs, which looks exactly like nothing having triggered it.
 
 The `config` job runs `python -m src.doctor --config-only`. Fork pull requests
-have no secrets, and their absence is not a failure of the thing being tested,
-so credential checks are skipped there and left to the manual `doctor`
-workflow.
+have no secrets and no browser, and their absence is not a failure of the thing
+being tested, so the credential and live checks are skipped there and left to
+the manual `doctor` workflow.
 
 Dependencies carry upper bounds and Dependabot proposes monthly bumps. This
 runs unattended on a cron, so a breaking major release should fail a visible
@@ -290,14 +308,16 @@ PR rather than a Tuesday morning scan.
 python -m src.scan              # what the cron does
 python -m src.scan --dry-run    # no email, no writes
 python -m src.scan --sweep      # force a full sweep now
-python -m src.scan --limit 20   # cap API calls
+python -m src.scan --limit 20   # cap page loads this run
+python -m src.alaska --from SEA --to ABQ --depart 2026-10-17 --return 2026-10-24
 python -m pytest tests -q
 ruff check src tests
 ```
 
+Everything that touches live fares needs `playwright install chromium` first.
 The workflow runs twice daily, at **06:10 and 18:10 Pacific**, and commits
 `data/` back to the repo. `workflow_dispatch` exposes sweep and dry-run
-toggles and bypasses the gate below.
+toggles and bypasses the DST gate below.
 
 GitHub cron is UTC only, so holding a fixed local time across DST takes four
 entries and a gate job: 13:10 and 01:10 UTC are correct in daylight time,
@@ -323,6 +343,11 @@ being deleted. The live file stays small enough for fast median lookups, and
 the archive accumulates the full price curve for every flight from 180 days out
 to departure. That archive is the answer to "when does this route actually
 bottom out", which is worth more than the alerts.
+
+The older `data/archive/one-way-sum-inflated.jsonl` is a separate, quarantined
+capture: observations from before round trips were priced as a single search.
+They are systematically high and must never feed a baseline; see
+[data/archive/README.md](data/archive/README.md).
 
 ## Report and GitHub Pages
 
@@ -351,42 +376,34 @@ Set the repo variable `REPORT_URL` to the published address, typically
 Each alert carries two links, because no single one does both jobs:
 
 - **See these dates** goes to Google Flights for the exact departure and
-  return. It is the only source here that can be pinned to specific dates.
+  return. It is the cleanest source here that can be pinned to specific dates
+  from a plain-text query.
 - **Book on Alaska** goes to `alaskaair.com/en/flights-from-{city}-to-{city}`,
   a real route page with its own fare calendar. Verified to resolve. It is not
   date-specific, which is why it complements rather than replaces the first.
 
-City slugs come from the route `name`, so "Seattle to New Orleans" gives
-`seattle` and `new-orleans`. Override with `origin_city` and
-`destination_city` when the derived slug is wrong.
-
-Alaska publishes no dated deep-link format, and an earlier version of this
-tool shipped guessed query parameters for one. That was removed rather than
-risk a link landing on an empty search.
-
-## Quota
-
-`state.json` carries a rolling monthly counter. The scanner stops once it hits
-`quota_reserve_pct` of `monthly_call_quota`. This is no longer an API
-allowance: Amadeus was decommissioned and the number is now a self-imposed
-ceiling on page loads against alaskaair.com, which matters for staying
-unobtrusive rather than for billing. `python -m src.budget` projects usage before you
-add routes.
+The scraper's own dated `/search/results` deep link is deliberately *not* used
+as a click target: it lands on a live search that re-runs on load rather than a
+clean booking or confirmation page. City slugs come from the route `name`, so
+"Seattle to New Orleans" gives `seattle` and `new-orleans`. Override with
+`origin_city` and `destination_city` when the derived slug is wrong.
 
 ## Caveats worth knowing
 
-- **These are GDS fares.** Alaska's web-only and Saver promos sometimes
-  undercut what Amadeus returns, so the tool will occasionally miss a drop. It
-  should not report a price that does not exist, which is the failure mode that
-  actually matters.
-- **`includedAirlineCodes=AS` means Alaska-marketed**, which can include a
-  codeshare. `nonStop=true` keeps it to direct flights, and the alert email
-  lists flight numbers so you can eyeball it.
-- **Award fares are not covered.** Amadeus does not expose mileage pricing. If
-  you want Mileage Plan award alerts that is a separate data source entirely.
-- **Prices are per the configured `adults` count** and include taxes
-  (`grandTotal`).
-- **Alert links go to Google Flights**, not Alaska. Alaska publishes no
-  deep-link format, so rather than ship a guessed URL that might land on an
-  empty search, the email links to a Google Flights query for the same
-  nonstop itinerary.
+- **Prices are exactly what alaskaair.com shows** for a nonstop, Alaska-marketed
+  itinerary at the configured `adults` count. There is no GDS or third-party
+  layer to disagree with; the tradeoff is that the scraper depends on the page's
+  structure.
+- **Datacenter-IP bot detection is the standing risk.** If Alaska starts
+  challenging the GitHub runner, the scraper raises rather than silently
+  recording "no service", the run's failure guard trips, and the `alaska-probe`
+  canary goes red. It should never report a price that does not exist.
+- **A markup change fails loudly.** The scraper reads brand columns from the
+  page's own headers and refuses to guess when the tiles and headers do not line
+  up, so a redesign surfaces as an error, not as mislabelled data.
+- **Regional operators show through.** An Alaska-marketed nonstop may be flown
+  by Horizon (`QX`) or SkyWest (`OO`). Those are still bookable and still earn
+  points; the doctor flags them and the alert email lists flight numbers.
+- **Award fares are not covered.** No free feed exposes mileage pricing. The
+  redeem-or-pay verdict is a best-case cents-per-point at the chart floor, not a
+  quote; check award space by hand before acting on it.

@@ -7,7 +7,7 @@ Goal of this spike (NOT shipping code):
   2. Discover the shopping XHR/fetch endpoint the site calls (URL, method,
      headers, request body, response shape) so a later, lighter client can
      replay it directly ("copy as cURL" path).
-  3. Confirm the response carries what src.amadeus.Offer needs: a per-flight
+  3. Confirm the response carries what src.alaska.Offer needs: a per-flight
      price plus a fare brand string we can match "SAVER" against.
 
 Why browser-driving and not a guessed URL:
