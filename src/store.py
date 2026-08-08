@@ -13,7 +13,9 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
 HISTORY_PATH = os.environ.get("HISTORY_FILE", "data/history.jsonl")
-ARCHIVE_PATH = os.environ.get("ARCHIVE_FILE", "data/archive.jsonl")
+# All archival data lives under data/archive/ (which also holds the quarantined
+# one-way-sum-inflated.jsonl), so "archive" is a directory, not a sibling file.
+ARCHIVE_PATH = os.environ.get("ARCHIVE_FILE", "data/archive/departed.jsonl")
 STATE_PATH = os.environ.get("STATE_FILE", "data/state.json")
 
 

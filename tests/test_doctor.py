@@ -185,3 +185,54 @@ def test_missing_email_config_fails(monkeypatch):
     rep = doctor.Report()
     doctor.check_email(rep)
     assert rep.failed == 1
+
+
+class _Resp:
+    def __init__(self, status_code):
+        self.status_code = status_code
+
+
+def _email_env(monkeypatch, sender=None):
+    monkeypatch.setenv("RESEND_API_KEY", "k")
+    monkeypatch.setenv("ALERT_EMAIL_TO", "me@example.com")
+    if sender is None:
+        monkeypatch.delenv("ALERT_EMAIL_FROM", raising=False)
+    else:
+        monkeypatch.setenv("ALERT_EMAIL_FROM", sender)
+
+
+def test_email_invalid_key_fails(monkeypatch):
+    _email_env(monkeypatch, sender="alerts@my.com")
+    monkeypatch.setattr(doctor.requests, "get", lambda *a, **k: _Resp(401))
+    rep = doctor.Report()
+    doctor.check_email(rep)
+    assert doctor.FAIL in statuses(rep, "Resend key valid")
+
+
+def test_email_unexpected_status_warns(monkeypatch):
+    _email_env(monkeypatch, sender="alerts@my.com")
+    monkeypatch.setattr(doctor.requests, "get", lambda *a, **k: _Resp(500))
+    rep = doctor.Report()
+    doctor.check_email(rep)
+    assert doctor.WARN in statuses(rep, "Resend key valid")
+
+
+def test_email_network_error_warns(monkeypatch):
+    _email_env(monkeypatch, sender="alerts@my.com")
+
+    def boom(*a, **k):
+        raise ConnectionError("dns failure")
+
+    monkeypatch.setattr(doctor.requests, "get", boom)
+    rep = doctor.Report()
+    doctor.check_email(rep)
+    assert doctor.WARN in statuses(rep, "Resend reachable")
+
+
+def test_email_ok_but_resend_dev_sender_warns(monkeypatch):
+    _email_env(monkeypatch, sender=None)   # defaults to alerts@resend.dev
+    monkeypatch.setattr(doctor.requests, "get", lambda *a, **k: _Resp(200))
+    rep = doctor.Report()
+    doctor.check_email(rep)
+    assert doctor.OK in statuses(rep, "Resend key valid")
+    assert doctor.WARN in statuses(rep, "sender domain")

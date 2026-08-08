@@ -33,14 +33,28 @@ import argparse
 import atexit
 import contextlib
 import logging
+import random
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from urllib.parse import urlencode
 
 log = logging.getLogger(__name__)
 
 RESULTS_URL = "https://www.alaskaair.com/search/results"
+
+# Space out navigations. A tight, regular stream of identical requests from one
+# datacenter IP is exactly what bot detection scores on, so wait a randomized
+# interval between page loads. The jitter matters as much as the mean: a fixed
+# delay is itself a signature.
+DEFAULT_MIN_INTERVAL_S = 3.0
+DEFAULT_MAX_INTERVAL_S = 8.0
+# Reload a grid that never rendered a few times before declaring it blocked. A
+# slow SPA paint or a one-off challenge is transient; a real outage fails every
+# attempt and still trips the scanner's failure guard.
+DEFAULT_MAX_RETRIES = 2
+DEFAULT_RETRY_BACKOFF_S = 2.0
 
 # Column headers, in the order Alaska renders them, map 1:1 to valuetile columns.
 KNOWN_BRANDS = ("SAVER", "MAIN", "PREMIUM", "FIRST")
@@ -90,13 +104,49 @@ class Alaska:
     launch cost across every date it prices.
     """
 
-    def __init__(self, *, headless: bool = True, nav_timeout_ms: int = 45000):
+    def __init__(
+        self, *, headless: bool = True, nav_timeout_ms: int = 45000,
+        min_interval_s: float = DEFAULT_MIN_INTERVAL_S,
+        max_interval_s: float = DEFAULT_MAX_INTERVAL_S,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        retry_backoff_s: float = DEFAULT_RETRY_BACKOFF_S,
+    ):
         self.headless = headless
         self.nav_timeout_ms = nav_timeout_ms
+        self.min_interval_s = min_interval_s
+        self.max_interval_s = max_interval_s
+        self.max_retries = max_retries
+        self.retry_backoff_s = retry_backoff_s
         self.calls_made = 0
+        self._last_nav = 0.0
         self._pw = None
         self._browser = None
         self._page = None
+
+    # -------------------------------------------------------------- pacing
+    def _pace(self) -> None:
+        """Sleep a jittered interval since the last navigation.
+
+        No wait before the first load. Set ``max_interval_s=0`` to disable
+        (used in tests so they do not sleep).
+        """
+        if self._last_nav and self.max_interval_s > 0:
+            wait = random.uniform(self.min_interval_s, self.max_interval_s)
+            elapsed = time.monotonic() - self._last_nav
+            if elapsed < wait:
+                time.sleep(wait - elapsed)
+        self._last_nav = time.monotonic()
+
+    @staticmethod
+    def _is_dead_browser(exc: Exception) -> bool:
+        """Whether an exception means the page/context/browser died mid-run.
+
+        A crashed renderer (OOM on the runner, closed target) leaves the cached
+        page non-None, so without this every later call would re-fail against a
+        dead page and cascade the whole run into the failure guard.
+        """
+        msg = str(exc).lower()
+        return any(s in msg for s in ("closed", "crash", "target", "disconnected"))
 
     # ------------------------------------------------------------ browser
     def _ensure_page(self):
@@ -206,16 +256,13 @@ class Alaska:
         round-trip grid already shows round-trip totals.
         """
         allowed = set(CABIN_BRANDS.get(cabin.upper(), ("SAVER", "MAIN")))
-        page = self._ensure_page()
         self.calls_made += 1
-        page.goto(self._url(origin, destination, depart, adults, ret),
-                  wait_until="domcontentloaded")
-
-        fares = self._scrape(page, nonstop=nonstop)
+        url = self._url(origin, destination, depart, adults, ret)
+        fares = self._load_fares(url, nonstop=nonstop)
         if fares is None:
-            # Grid never rendered: likely a bot challenge or an outage, not a
-            # merely-unserved route. Raise so the scanner's failure guard trips
-            # instead of silently recording "no service".
+            # Grid never rendered after retries: a bot challenge or an outage,
+            # not a merely-unserved route. Raise so the scanner's failure guard
+            # trips instead of silently recording "no service".
             raise RuntimeError(
                 f"no fare grid for {origin}-{destination} {depart} "
                 f"(blocked, or page structure changed)")
@@ -245,6 +292,47 @@ class Alaska:
             saver_price=saver_price,
             savers_excluded=len(savers) if exclude_saver else 0,
         )
+
+    def _load_fares(self, url: str, *, nonstop: bool) -> list[_Fare] | None:
+        """Load and parse a results page, with pacing, retries and recovery.
+
+        Returns the parsed fares (possibly an empty list for a genuinely
+        unserved date), or None if the grid never rendered after every retry.
+        A bounded reload absorbs the transient jitter the scanner's failure
+        guard is meant to see through, without masking a real block: a genuine
+        outage fails every attempt and still returns None. A parse mismatch
+        (the markup changed) is a deliberate "refuse to guess" and propagates
+        immediately rather than being retried.
+        """
+        for attempt in range(self.max_retries + 1):
+            self._pace()
+            page = self._ensure_page()
+            try:
+                resp = page.goto(url, wait_until="domcontentloaded")
+                status = resp.status if resp is not None else None
+            except Exception as exc:
+                # Navigation itself failed. Rebuild only if the browser died;
+                # otherwise just reload on the next attempt.
+                if self._is_dead_browser(exc):
+                    log.warning("browser unresponsive (%s); rebuilding", exc)
+                    self.close()
+                else:
+                    log.warning("navigation failed (%s); retrying", exc)
+            else:
+                # _scrape's mismatch RuntimeError is intentionally outside this
+                # guard so it surfaces instead of being retried.
+                fares = self._scrape(page, nonstop=nonstop)
+                # An HTTP error page (403/429/5xx) is a block or outage, never a
+                # genuinely unserved date, so do not let the empty-grid branch
+                # record it as "no service".
+                if fares == [] and status is not None and status >= 400:
+                    fares = None
+                if fares is not None:
+                    return fares
+            if attempt < self.max_retries:
+                backoff = self.retry_backoff_s * (attempt + 1)
+                time.sleep(random.uniform(backoff, backoff * 2))
+        return None
 
     def _scrape(self, page, *, nonstop: bool) -> list[_Fare] | None:
         """Parse the fare matrix from the rendered DOM.

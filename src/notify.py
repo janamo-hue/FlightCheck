@@ -5,10 +5,10 @@ from __future__ import annotations
 import html
 import logging
 import os
-from urllib.parse import urlencode
 
 import requests
 
+from . import links
 from .alerts import Alert
 
 log = logging.getLogger(__name__)
@@ -20,34 +20,14 @@ REPORT_URL = os.environ.get("REPORT_URL", "")
 
 
 def booking_url(alert: Alert) -> str:
-    """Google Flights search for the exact dates.
-
-    An earlier version built an alaskaair.com/search/results deep link from
-    guessed query parameters. Alaska publishes no dated deep-link format and
-    the guess could not be verified, so it was dropped rather than ship a
-    link that may land on an empty search. Google Flights takes a plain
-    natural language query and is the only source here that can be pinned to
-    a specific departure and return.
-    """
+    """Google Flights search for the exact dates (see src.links)."""
     origin, destination = alert.route_key.split("-")
-    query = f"Flights from {origin} to {destination} on {alert.depart}"
-    if alert.ret:
-        query += f" through {alert.ret}"
-    query += " nonstop"
-    return "https://www.google.com/travel/flights?" + urlencode({"q": query})
+    return links.google_flights_url(origin, destination, alert.depart, alert.ret)
 
 
 def alaska_url(alert: Alert) -> str | None:
-    """Alaska's own route page, which carries a fare calendar.
-
-    Verified to exist and resolve. Not date-specific, so it complements the
-    Google Flights link rather than replacing it: this one is where you
-    actually book, that one is where you confirm the date.
-    """
-    if not alert.cities:
-        return None
-    origin, destination = alert.cities
-    return f"https://www.alaskaair.com/en/flights-from-{origin}-to-{destination}"
+    """Alaska's own route page, which carries a fare calendar (see src.links)."""
+    return links.alaska_route_url(alert.cities)
 
 
 def _links(alert: Alert) -> str:

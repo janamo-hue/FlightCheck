@@ -155,6 +155,13 @@ def main(argv=None) -> int:
     if attempted and failed / attempted > MAX_FAILURE_RATE:
         log.error("%d of %d pricing calls failed, above the %.0f%% tolerance. "
                   "Not recording this run.", failed, attempted, MAX_FAILURE_RATE * 100)
+        # Still debit the page loads actually made, so a persistently broken run
+        # cannot hammer alaskaair.com every cron while the monthly reserve never
+        # engages. Re-read state so this failed run's sweep marks are NOT
+        # persisted: a broken run should resume its sweep, not retire it.
+        persisted = store.load_state()
+        store.spend_quota(persisted, client.calls_made, asof)
+        store.save_state(persisted)
         return 2
 
     if args.dry_run:

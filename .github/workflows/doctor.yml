@@ -39,7 +39,10 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           ALERT_EMAIL_FROM: ${{ vars.ALERT_EMAIL_FROM }}
+          # Via env + quoting, never interpolated into the shell, so a crafted
+          # dispatch value cannot inject commands (skip_live is a safe literal).
+          PROBES: ${{ inputs.probes || 3 }}
         run: |
           python -m src.doctor \
-            --probes ${{ inputs.probes || 3 }} \
+            --probes "$PROBES" \
             ${{ inputs.skip_live && '--skip-live' || '' }}

@@ -17,12 +17,11 @@ def main() -> int:
     print(f"{'route':<28} {'sweep':>7} {'per run':>7} {'per month':>10}")
     print("-" * 56)
 
-    total = 0
+    total = 0.0
     for route in cfg.routes:
         sweep = len(planner.sweep_tasks(route, today))
         daily = min(route.watchlist_size, sweep)
-        # Sweeps stay weekly; only the watchlist re-check scales with run count.
-        monthly = sweep * 4.35 + daily * 30 * cfg.runs_per_day
+        monthly = planner.route_monthly_loads(route, cfg.runs_per_day, today)
         total += monthly
         print(f"{route.name:<28} {sweep:>7} {daily:>7} {monthly:>10,.0f}")
 
