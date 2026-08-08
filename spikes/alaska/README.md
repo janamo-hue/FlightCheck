@@ -58,7 +58,7 @@ scraper somewhere with a residential IP.
 1. `run.log` / stdout — the summary lists every captured endpoint.
 2. `responses/*.json` — confirm each nonstop flight has a **price** and a
    **fare brand** we can match `SAVER` against. That is the whole contract the
-   rest of the app needs (`src/amadeus.py:Offer`).
+   rest of the app needs (now `src/alaska.py:Offer`).
 3. `session.har` — find the request that produced the fare JSON; its URL,
    headers, and body become the seed for the "copy as cURL" replay client.
 
@@ -105,7 +105,7 @@ HAR + rendered DOM established the actual data architecture:
   - carrier `AS`, duration like `2h 19m`
 - **Saver detection becomes EXACT.** Alaska labels a SAVER column, so
   `exclude_saver` = take the MAIN column price. No more loose string match
-  (`src/amadeus.py:is_saver` apologises for guessing).
+  (the old Amadeus client had to guess at the brand string).
 - **Viability signal (positive, local IP only):** the ad beacons show the UA was
   literally `HeadlessChrome/147`, yet Alaska served real fares. The `_fs-ch-*` /
   `check-detection` / `acd` calls are F5/Shape-style detection, but it did not
@@ -134,5 +134,5 @@ Alaska's DOM and payloads change, so expect to iterate:
 ## Next step after a green run
 
 Copy the working request out of the HAR and prototype `src/alaska.py` exposing
-the same `cheapest_direct(...) -> Offer | None` signature as `src/amadeus.py`,
-so the planner/store/alerts/report code is untouched.
+the same `cheapest_direct(...) -> Offer | None` signature the app already
+expects, so the planner/store/alerts/report code is untouched.

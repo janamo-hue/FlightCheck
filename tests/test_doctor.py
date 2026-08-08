@@ -1,6 +1,6 @@
 
 from src import doctor
-from src.amadeus import Offer
+from src.alaska import Offer
 from src.config import Config, Route
 
 
@@ -20,7 +20,7 @@ class FakeClient:
 
     def __init__(self, serves=None, offer=None, raises=None):
         self.serves, self.raises = serves, raises
-        self.offer = offer or Offer(300.0, "USD", "AS", ["AS1234"], "PT2H", 4)
+        self.offer = offer or Offer(300.0, "USD", "AS", ["AS1234"], "PT2H")
         self.calls_made = 0
 
     def cheapest_direct(self, o, d, depart, ret=None, **kw):
@@ -84,9 +84,11 @@ def test_partially_served_route_warns_rather_than_fails():
     assert rep.failed == 0
 
 
-def test_codeshare_segments_are_flagged():
+def test_regional_operating_carrier_is_flagged():
+    # The grid marks every card AS-marketed; the operating carrier shows up in
+    # the flight-number prefix. QX (Horizon) flying as AS should be surfaced.
     rep = doctor.Report()
-    client = FakeClient(offer=Offer(300.0, "USD", "AA,AS", ["AA100", "AS1"], "PT2H", 3))
+    client = FakeClient(offer=Offer(300.0, "USD", "AS", ["QX2401"], "PT2H"))
     doctor.check_live(rep, cfg(), client, probes=1)
     assert doctor.WARN in statuses(rep, "operating carrier")
 
@@ -109,15 +111,6 @@ def test_probe_errors_warn_but_do_not_abort_the_route():
     doctor.check_live(rep, cfg(), FakeClient(raises=RuntimeError("boom")), probes=2)
     assert statuses(rep, "service exists") == [doctor.FAIL]
     assert len(statuses(rep, "probe")) == 2
-
-
-def test_quota_exhaustion_stops_the_live_check():
-    from src.amadeus import QuotaExceeded
-    rep = doctor.Report()
-    doctor.check_live(rep, cfg(route(), route(name="b", destination="MSY")),
-                      FakeClient(raises=QuotaExceeded("spent")), probes=2)
-    assert statuses(rep, "Amadeus quota") == [doctor.FAIL]
-    assert not statuses(rep, "service exists")
 
 
 # ------------------------------------------------------------- config checking
@@ -155,15 +148,35 @@ def test_over_quota_config_fails(monkeypatch):
     monkeypatch.setattr(doctor.config, "load",
                         lambda: Config(routes=heavy, monthly_call_quota=2000))
     doctor.check_config(rep)
-    assert statuses(rep, "quota projection") == [doctor.FAIL]
+    assert statuses(rep, "projection") == [doctor.FAIL]
 
 
-def test_missing_credentials_fail(monkeypatch):
-    monkeypatch.delenv("AMADEUS_CLIENT_ID", raising=False)
-    monkeypatch.delenv("AMADEUS_CLIENT_SECRET", raising=False)
+def test_missing_browser_fails(monkeypatch):
+    class Dead:
+        def _ensure_page(self):
+            raise RuntimeError("chromium not installed")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(doctor, "Alaska", lambda *a, **k: Dead())
     rep = doctor.Report()
-    assert doctor.check_credentials(rep) is None
+    assert doctor.check_browser(rep) is None
     assert rep.failed == 1
+
+
+def test_browser_ready_passes(monkeypatch):
+    class Live:
+        def _ensure_page(self):
+            return object()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(doctor, "Alaska", lambda *a, **k: Live())
+    rep = doctor.Report()
+    assert doctor.check_browser(rep) is not None
+    assert rep.failed == 0
 
 
 def test_missing_email_config_fails(monkeypatch):

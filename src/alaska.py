@@ -3,28 +3,28 @@
 Drop-in replacement for the decommissioned Amadeus Self-Service client. Exposes
 the same surface the scanner depends on: an ``Alaska`` client with
 ``cheapest_direct(...) -> Offer | None`` and a ``calls_made`` counter, plus the
-``Offer`` dataclass and a ``QuotaExceeded`` exception (kept for interface
-compatibility; scraping has no monthly quota, so it is never raised here).
+``Offer`` dataclass.
 
 Why scraping and not an API: Amadeus Self-Service shut down 2026-07-17 and
 Alaska publishes no free fare API. Its results page renders a fare matrix into
 the DOM with stable ``data-testid`` hooks, discovered via spikes/alaska/. See
 that folder's README for the reverse-engineering trail.
 
-The results URL is a real dated deep link (this overturns the note in
-notify.py:booking_url, written before the format was known):
+The results URL is a real dated deep link:
 
     https://www.alaskaair.com/search/results?O=SEA&D=SFO&OD=2026-08-19&A=1&RT=false&locale=en-us
 
 Each nonstop flight is a ``flight-card-N`` with fare cells ``valuetile-N-C``,
 one per brand column read from ``columnheader-*`` (SAVER, MAIN, PREMIUM, FIRST).
 Because Alaska labels the SAVER column explicitly, Saver exclusion is exact
-here, unlike the brand-string guess the Amadeus client had to make.
+here, unlike the brand-string guess the old Amadeus client had to make.
 
-Round trips are priced as two one-way loads (outbound + return) and summed:
-Alaska exposes no round-trip results deep link (RT=true falls back to the
-booking home) and prices each direction independently, so the sum is both
-reachable and correct. See spikes/alaska/README.md.
+A round trip is one page load, not two. ``RT=true`` with the return date in
+``DD`` renders a grid of round-trip totals, so both directions are priced
+together in a single search. An earlier version summed two one-way loads and
+overstated every total, because Alaska discounts a round trip against two
+one-ways by a flat amount per brand. See ``cheapest_direct`` for the numbers
+and spikes/alaska/README.md for how the ``DD`` parameter was found.
 """
 
 from __future__ import annotations
@@ -58,10 +58,6 @@ _PRICE = re.compile(r"\$\s?([0-9][0-9,]*)")
 _FLIGHT = re.compile(r"\b((?:AS|OO|QX)\s?\d{2,4})\b")
 
 
-class QuotaExceeded(RuntimeError):
-    """Kept for parity with the old Amadeus client. Not raised by scraping."""
-
-
 @dataclass
 class Offer:
     price: float
@@ -69,18 +65,12 @@ class Offer:
     carrier: str
     flight_numbers: list[str]
     duration: str | None
-    seats_left: int | None
     branded_fare: str | None = None
-    fare_basis: str | None = None
     saver_price: float | None = None
     savers_excluded: int = 0
     # Every brand seen and its cheapest price. Two numbers per search were not
     # enough to notice that they were the wrong two.
     ladder: dict[str, float] = field(default_factory=dict)
-
-    @property
-    def is_saver(self) -> bool:
-        return bool(self.branded_fare and "SAVER" in self.branded_fare.upper())
 
 
 @dataclass
@@ -251,9 +241,7 @@ class Alaska:
             carrier="AS",
             flight_numbers=best.flight_numbers,
             duration=best.duration,
-            seats_left=None,               # not exposed in the grid
             branded_fare=best.brand,
-            fare_basis=None,
             saver_price=saver_price,
             savers_excluded=len(savers) if exclude_saver else 0,
         )

@@ -2,7 +2,7 @@
 
 Chosen over a database so there is zero infrastructure and git diffs stay
 readable. At a few routes checked daily this stays well under a megabyte
-per year. Swap in Supabase later by reimplementing observations()/append().
+per year. Swap in Supabase later by reimplementing load_history()/append().
 """
 
 from __future__ import annotations

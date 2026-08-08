@@ -1,7 +1,8 @@
 name: doctor
 
 # Manual only. Run this after adding the secrets and before enabling the cron.
-# Costs one Amadeus call per route per probe, so 9 calls at the defaults.
+# The live check loads one Alaska results page per route per probe, so 6 page
+# loads at the defaults (2 routes x 3 probes).
 
 on:
   workflow_dispatch:
@@ -11,7 +12,7 @@ on:
         type: string
         default: "3"
       skip_live:
-        description: "Config and credentials only, no API calls"
+        description: "Config, browser and email only, no page loads"
         type: boolean
         default: false
 
@@ -28,11 +29,13 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # The live check drives a headless browser, so Chromium must be present.
+      # pip installs the playwright package but not the browser binary.
+      - name: Install Chromium for the Alaska scraper
+        run: python -m playwright install --with-deps chromium
+
       - name: Preflight
         env:
-          AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
-          AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
-          AMADEUS_ENV: ${{ vars.AMADEUS_ENV || 'production' }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           ALERT_EMAIL_FROM: ${{ vars.ALERT_EMAIL_FROM }}
