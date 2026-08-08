@@ -78,13 +78,7 @@ def check_config(rep: Report):
                     "unset, so no redeem/pay verdict for this route")
 
     today = date.today()
-    # Sweeps stay weekly (4.35 weeks/month); only the daily watchlist re-check
-    # scales with runs_per_day. This must match src.budget's projection.
-    monthly = sum(
-        len(planner.sweep_tasks(r, today)) * 4.35
-        + min(r.watchlist_size, len(planner.sweep_tasks(r, today))) * 30 * cfg.runs_per_day
-        for r in cfg.routes
-    )
+    monthly = planner.projected_monthly_loads(cfg.routes, cfg.runs_per_day, today)
     pct = monthly / cfg.monthly_call_quota * 100
     status = FAIL if pct > 100 else WARN if pct > 85 else OK
     rep.add(status, "monthly page-load projection",

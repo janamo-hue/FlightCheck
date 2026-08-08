@@ -38,12 +38,21 @@ jobs:
           python-version: "3.12"
       - run: pip install playwright && playwright install --with-deps chromium
       - name: Probe round-trip parameters
+        # Inputs pass through env + quoting, never interpolated into the shell,
+        # so a crafted dispatch value cannot inject commands onto the runner.
+        env:
+          ORIGIN: ${{ inputs.origin }}
+          DEST: ${{ inputs.destination }}
+          DEPART: ${{ inputs.depart }}
+          RET: ${{ inputs.ret }}
+          EXPECT_MAIN: ${{ inputs.expect_main }}
+          EXPECT_SAVER: ${{ inputs.expect_saver }}
         run: |
           python spikes/alaska/rt_probe.py \
-            --from '${{ inputs.origin }}' --to '${{ inputs.destination }}' \
-            --depart '${{ inputs.depart }}' --ret '${{ inputs.ret }}' \
-            --expect-main '${{ inputs.expect_main }}' \
-            --expect-saver '${{ inputs.expect_saver }}' \
+            --from "$ORIGIN" --to "$DEST" \
+            --depart "$DEPART" --ret "$RET" \
+            --expect-main "$EXPECT_MAIN" \
+            --expect-saver "$EXPECT_SAVER" \
             | tee probe.log
       - if: always()
         uses: actions/upload-artifact@v4

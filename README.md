@@ -338,15 +338,15 @@ Chosen over Postgres so there is nothing to provision and git diffs stay
 readable. If it outgrows this, reimplement `load_history` and `append` against
 Supabase and nothing else changes.
 
-Once a departure date passes, its rows move to `data/archive.jsonl` rather than
-being deleted. The live file stays small enough for fast median lookups, and
-the archive accumulates the full price curve for every flight from 180 days out
-to departure. That archive is the answer to "when does this route actually
-bottom out", which is worth more than the alerts.
+Once a departure date passes, its rows move to `data/archive/departed.jsonl`
+rather than being deleted. The live file stays small enough for fast median
+lookups, and the archive accumulates the full price curve for every flight from
+180 days out to departure. That archive is the answer to "when does this route
+actually bottom out", which is worth more than the alerts.
 
-The older `data/archive/one-way-sum-inflated.jsonl` is a separate, quarantined
-capture: observations from before round trips were priced as a single search.
-They are systematically high and must never feed a baseline; see
+Alongside it, `data/archive/one-way-sum-inflated.jsonl` is a separate,
+quarantined capture: observations from before round trips were priced as a
+single search. They are systematically high and must never feed a baseline; see
 [data/archive/README.md](data/archive/README.md).
 
 ## Report and GitHub Pages

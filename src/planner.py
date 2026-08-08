@@ -63,6 +63,22 @@ def sweep_tasks(route: Route, today: date) -> list[Task]:
     return tasks
 
 
+def route_monthly_loads(route: Route, runs_per_day: int, today: date) -> float:
+    """Projected page loads/month for one route.
+
+    Sweeps stay weekly (4.35 weeks/month); only the daily watchlist re-check
+    scales with runs_per_day. Single-sourced here so src.budget and src.doctor
+    cannot drift apart.
+    """
+    sweep = len(sweep_tasks(route, today))
+    daily = min(route.watchlist_size, sweep)
+    return sweep * 4.35 + daily * 30 * runs_per_day
+
+
+def projected_monthly_loads(routes: list[Route], runs_per_day: int, today: date) -> float:
+    return sum(route_monthly_loads(r, runs_per_day, today) for r in routes)
+
+
 def should_sweep(route: Route, today: date, state: dict) -> bool:
     last = state.get("last_sweep", {}).get(route.key)
     if last is None:

@@ -14,9 +14,8 @@ import html
 import os
 from collections import defaultdict
 from datetime import timedelta
-from urllib.parse import urlencode
 
-from . import alerts, config, store
+from . import alerts, config, links, store
 
 W, H, PAD = 640, 120, 8
 
@@ -90,15 +89,9 @@ def build(days: int = 60) -> str:
             when = f"{depart} to {ret}" if ret else f"{depart} one way"
 
             origin, destination = key.split("-")
-            q = f"Flights from {origin} to {destination} on {depart}"
-            if ret:
-                q += f" through {ret}"
-            gflights = ("https://www.google.com/travel/flights?"
-                        + urlencode({"q": q + " nonstop"}))
-            cities = route_cfg.cities() if route_cfg else None
-            alaska = (f"https://www.alaskaair.com/en/flights-from-{cities[0]}"
-                      f"-to-{cities[1]}") if cities else None
-            links = f'<a href="{gflights}">see these dates</a>' + (
+            gflights = links.google_flights_url(origin, destination, depart, ret or None)
+            alaska = links.alaska_route_url(route_cfg.cities() if route_cfg else None)
+            link_html = f'<a href="{gflights}">see these dates</a>' + (
                 f' &middot; <a href="{alaska}">book on Alaska</a>' if alaska else "")
             delta = latest.price - lo
             trend = "at the low" if delta <= 0.5 else f"{delta:,.0f} above the low"
@@ -132,7 +125,7 @@ def build(days: int = 60) -> str:
               <div class="thin">{len(obs_list)} observations, {trend}</div>
               {points}
               {sparkline([(o.observed_at, o.price) for o in obs_list])}
-              <div class="links">{links}</div>
+              <div class="links">{link_html}</div>
             </div>""")
 
         sections.append(f"<section><h2>{html.escape(name)} "
