@@ -2,15 +2,14 @@ name: fare scan
 
 on:
   schedule:
-    # GitHub cron is UTC only, so holding 06:00 and 18:00 Pacific year round
-    # takes four entries and a gate. Two fire in daylight time, two in
-    # standard time; the gate drops whichever pair is currently an hour off.
-    # Scheduling at :10 past means the usual Actions queueing delay cannot
-    # push a run into the next local hour and get it discarded.
-    - cron: "10 13 * * *"   # 06:10 PDT
-    - cron: "10 14 * * *"   # 06:10 PST
-    - cron: "10 01 * * *"   # 18:10 PDT
-    - cron: "10 02 * * *"   # 18:10 PST
+    # Two fixed UTC times ~12h apart. An earlier design used four crons plus a
+    # gate that checked the current Pacific hour, but GitHub delays scheduled
+    # runs unpredictably (often 30-120 min), so the wall-clock hour was usually
+    # wrong and the gate skipped nearly every run. Fixed UTC is immune: the
+    # local time drifts one hour across DST, which is irrelevant for a twice-
+    # daily fare check.
+    - cron: "10 13 * * *"   # ~06:10 Pacific (05:10 PST / 06:10 PDT)
+    - cron: "10 01 * * *"   # ~18:10 Pacific (17:10 PST / 18:10 PDT)
   workflow_dispatch:
     inputs:
       sweep:
@@ -27,37 +26,12 @@ concurrency:
   cancel-in-progress: false
 
 # Least privilege by default; only the scan job needs write, and publish
-# declares its own Pages-scoped block below. The gate job just reads.
+# declares its own Pages-scoped block below.
 permissions:
   contents: read
 
 jobs:
-  # Half the scheduled triggers are an hour off in the current DST offset.
-  # Deciding here rather than mid-job means those show up as skipped rather
-  # than as a failure or, worse, a silent extra scrape.
-  gate:
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.check.outputs.run }}
-    steps:
-      - id: check
-        run: |
-          if [ "${{ github.event_name }}" != "schedule" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "manual dispatch, running"
-            exit 0
-          fi
-          hour=$(TZ=America/Los_Angeles date +%H)
-          if [ "$hour" = "06" ] || [ "$hour" = "18" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
-          echo "Pacific hour $hour -> run=$(cat "$GITHUB_OUTPUT" | tail -1)"
-
   scan:
-    needs: gate
-    if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write   # only this job commits data/ back to the repo
