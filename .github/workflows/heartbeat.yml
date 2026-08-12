@@ -1,0 +1,38 @@
+# Weekly proof-of-life email. Unlike the fare scan, this runs on a single
+# fixed UTC cron: it is once a week and the exact minute does not matter, so
+# there is no DST gate to get wrong. It only reads committed state/history and
+# sends mail, so it needs no browser.
+name: heartbeat
+
+on:
+  schedule:
+    - cron: "0 15 * * 1"   # Mondays 15:00 UTC (08:00 PT summer, 07:00 PT winter)
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Window in days"
+        default: "7"
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Send heartbeat
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          ALERT_EMAIL_FROM: ${{ vars.ALERT_EMAIL_FROM }}
+          REPORT_URL: ${{ vars.REPORT_URL }}
+        run: python -m src.heartbeat --days "${{ github.event.inputs.days || '7' }}"

@@ -80,6 +80,12 @@ def main(argv=None) -> int:
     tasks = planner.plan(cfg.routes, today, state, budget)
     if not tasks:
         log.info("nothing to price today")
+        if not args.dry_run:
+            # Still a real execution: record it so the heartbeat can tell a
+            # quiet day from a cron that never fired.
+            store.record_run(state, calls=0, observations=0, alerts=0,
+                             emailed=False, asof=asof)
+            store.save_state(state)
         return 0
 
     sweeping = {t.route.key for t in tasks if t.tier == "sweep"}
@@ -182,12 +188,13 @@ def main(argv=None) -> int:
             if owed:
                 log.info("sweep resumes next run: %s, %d pairs owed", route.key, owed)
 
-    if triggered:
-        notify.send(triggered)
+    emailed = notify.send(triggered) if triggered else False
 
     used = store.spend_quota(state, client.calls_made, asof)
     live, moved = store.archive()
     dropped = store.prune_alert_state(state, asof=asof)
+    store.record_run(state, calls=client.calls_made, observations=len(fresh),
+                     alerts=len(triggered), emailed=emailed, asof=asof)
     log.info("quota %d/%d this month | history %d live, %d archived | "
              "%d stale alert records dropped",
              used, cfg.monthly_call_quota, live, moved, dropped)

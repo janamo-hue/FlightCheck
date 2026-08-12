@@ -20,6 +20,7 @@ ignore = [
 # Inline HTML with style attributes does not wrap without hurting readability.
 "src/notify.py" = ["E501"]
 "src/report.py" = ["E501"]
+"src/heartbeat.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

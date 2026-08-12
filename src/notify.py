@@ -120,15 +120,12 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
     return subject, body
 
 
-def send(alerts: list[Alert], dry_run: bool = False) -> bool:
-    if not alerts:
-        return False
+def send_email(subject: str, body: str) -> bool:
+    """Deliver one HTML email via Resend. Shared by alerts and the heartbeat.
 
-    subject, body = render(alerts)
-    if dry_run:
-        print(f"[dry-run] subject: {subject}")
-        return False
-
+    Returns True only on a real 2xx send, so callers can record whether mail
+    actually went out rather than assuming it did.
+    """
     api_key = os.environ.get("RESEND_API_KEY")
     to = os.environ.get("ALERT_EMAIL_TO")
     sender = os.environ.get("ALERT_EMAIL_FROM", "alerts@resend.dev")
@@ -146,3 +143,15 @@ def send(alerts: list[Alert], dry_run: bool = False) -> bool:
         log.error("resend failed %s: %s", resp.status_code, resp.text[:300])
         return False
     return True
+
+
+def send(alerts: list[Alert], dry_run: bool = False) -> bool:
+    if not alerts:
+        return False
+
+    subject, body = render(alerts)
+    if dry_run:
+        print(f"[dry-run] subject: {subject}")
+        return False
+
+    return send_email(subject, body)

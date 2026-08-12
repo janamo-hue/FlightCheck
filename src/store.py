@@ -107,6 +107,35 @@ def prune_alert_state(state: dict, keep_days: int = 30, asof: datetime | None = 
     return len(stale)
 
 
+def record_run(state: dict, *, calls: int, observations: int, alerts: int,
+               emailed: bool, asof: datetime | None = None,
+               keep_days: int = 40) -> int:
+    """Append a per-run activity record, pruning entries older than keep_days.
+
+    This is what the weekly heartbeat reads to prove the scanner actually ran:
+    price history alone cannot distinguish "no price drops" from "the cron
+    never fired". Old records are trimmed so state.json stays small.
+    """
+    asof = asof or now()
+    runs = state.setdefault("runs", [])
+    runs.append({
+        "at": asof.isoformat(),
+        "calls": calls,
+        "observations": observations,
+        "alerts": alerts,
+        "emailed": bool(emailed),
+    })
+    cutoff = (asof - timedelta(days=keep_days)).isoformat()
+    state["runs"] = [r for r in runs if r.get("at", "") >= cutoff]
+    return len(state["runs"])
+
+
+def runs_since(state: dict, since: datetime) -> list[dict]:
+    """Run records at or after `since`, oldest first."""
+    cutoff = since.isoformat()
+    return [r for r in state.get("runs", []) if r.get("at", "") >= cutoff]
+
+
 def index(history: list[Observation]) -> dict[tuple[str, str], list[Observation]]:
     """Group observations by (route, date pair), oldest first."""
     buckets: dict[tuple[str, str], list[Observation]] = {}
