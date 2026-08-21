@@ -1,5 +1,6 @@
 import itertools
 from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 
 import pytest
 
@@ -472,3 +473,56 @@ def test_email_shows_the_saver_premium():
                                  distance_miles=2083, branded_fare="MAIN")])
     assert "above the Saver" in body
     assert "2.8c per point earned" in body
+
+
+# ---------------------------------------------------- calendar-anchored grid
+
+def test_grid_is_anchored_to_the_calendar_not_the_run_date():
+    """Consecutive weekly sweeps must revisit the same departures.
+
+    The drifting version overlapped on 3 of ~18 dates between real sweeps,
+    which left 125 of 133 pairs with one observation and no path to alerting.
+    """
+    r = route(near_stride_days=4, sweep_stride_days=12)
+    a = {t.depart for t in sweep_tasks(r, TODAY)}
+    b = {t.depart for t in sweep_tasks(r, TODAY + timedelta(days=7))}
+    assert len(a & b) >= len(a) - 3          # only the window edges differ
+    inside = {d for d in a if "2026-09-01" < d < "2026-12-01"}
+    assert inside <= b                        # interior dates all revisited
+
+
+def test_far_date_stays_on_grid_entering_the_near_tier():
+    r = route(near_stride_days=4, sweep_stride_days=12, near_days=60)
+    first = {t.depart for t in sweep_tasks(r, TODAY)}
+    far = sorted(d for d in first
+                 if date.fromisoformat(d) > TODAY + timedelta(days=60))
+    probe = far[0]
+    later = TODAY + timedelta(days=35)        # probe now inside the near tier
+    assert date.fromisoformat(probe) <= later + timedelta(days=60)
+    assert probe in {t.depart for t in sweep_tasks(r, later)}
+
+
+def test_near_tier_is_denser_than_far():
+    r = route(near_stride_days=4, sweep_stride_days=12, near_days=60)
+    dates = [date.fromisoformat(t.depart) for t in sweep_tasks(r, TODAY)]
+    near = [d for d in dates if d <= TODAY + timedelta(days=60)]
+    far = [d for d in dates if d > TODAY + timedelta(days=60)]
+    near_gap = min((b - a).days for a, b in pairwise(near))
+    far_gap = min((b - a).days for a, b in pairwise(far))
+    assert near_gap == 4 and far_gap == 12
+
+
+def test_single_tier_when_near_stride_unset():
+    dates = [date.fromisoformat(t.depart)
+             for t in sweep_tasks(route(sweep_stride_days=4), TODAY)]
+    assert {(b - a).days for a, b in pairwise(dates)} == {4}
+    assert all(d.toordinal() % 4 == 0 for d in dates)
+
+
+def test_weekday_grid_is_week_anchored():
+    r = route(near_stride_days=None, sweep_stride_days=2, depart_weekdays=[4])
+    a = {t.depart for t in sweep_tasks(r, TODAY)}
+    b = {t.depart for t in sweep_tasks(r, TODAY + timedelta(days=7))}
+    assert all(date.fromisoformat(d).weekday() == 4 for d in a)
+    inside = {d for d in a if "2026-09-01" < d < "2026-12-01"}
+    assert inside <= b

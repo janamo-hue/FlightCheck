@@ -29,21 +29,57 @@ class Task:
         return f"{self.depart}|{self.ret or ''}"
 
 
-def window_dates(route: Route, today: date) -> list[date]:
-    """Departure dates to sample.
+def _on_grid(d: date, stride: int, weekly: bool) -> bool:
+    """Membership in a calendar-anchored grid.
 
-    The stride is applied *after* the weekday filter, so
-    `depart_weekdays: [4], sweep_stride_days: 2` means every second Friday.
-    Striding first and then testing the weekday makes the two settings
-    multiply, which silently scans a fraction of the intended dates.
+    Anchored to the calendar (toordinal), never to the run date. The previous
+    version strided from ``today + window_start_days``, so each weekly sweep
+    sampled an almost disjoint set of departures: measured on 16 days of real
+    data, consecutive sweeps overlapped on 3 dates out of ~18, which left 125
+    of 133 tracked pairs with a single observation and, with min_observations
+    gating alerts, structurally unable to alert at all.
+
+    With a fixed phase, a departure date is on the grid or it is not, for
+    life. Every sweep revisits the same dates as the window slides, so history
+    accumulates and booking curves become comparable.
+
+    When a weekday filter is active the phase within the week is already fixed
+    by the filter, so the stride selects every Nth ISO-stable week instead
+    (toordinal//7 keeps no year-boundary seam).
+    """
+    if weekly:
+        return (d.toordinal() // 7) % stride == 0
+    return d.toordinal() % stride == 0
+
+
+def window_dates(route: Route, today: date) -> list[date]:
+    """Departure dates to sample: a fixed calendar grid, tiered by distance.
+
+    Dates within ``near_days`` of the window start use ``near_stride_days``;
+    the rest use ``sweep_stride_days``. Sixteen days of observations showed
+    fares five months out moving $10 while the volatility sits close in, so
+    the near tier samples densely where repricing actually happens. Keeping
+    ``sweep_stride_days`` a multiple of ``near_stride_days`` means a date
+    sampled in the far tier stays on the grid when it crosses into the near
+    tier, so its history is continuous.
     """
     start = today + timedelta(days=route.window_start_days)
     end = today + timedelta(days=route.window_end_days)
+    near_end = today + timedelta(days=route.near_days) if route.near_days else start
 
     days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     if route.depart_weekdays:
         days = [d for d in days if d.weekday() in route.depart_weekdays]
-    return days[:: route.sweep_stride_days]
+
+    weekly = bool(route.depart_weekdays)
+    out = []
+    for d in days:
+        stride = (route.near_stride_days
+                  if route.near_stride_days and d <= near_end
+                  else route.sweep_stride_days)
+        if _on_grid(d, stride, weekly):
+            out.append(d)
+    return out
 
 
 def _pairs(route: Route, depart: date) -> list[tuple[str, str | None]]:

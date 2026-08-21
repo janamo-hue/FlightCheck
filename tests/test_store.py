@@ -151,27 +151,15 @@ def test_runs_per_day_scales_only_the_watchlist(monkeypatch):
     assert projection(2) == 0
 
 
-def test_pacific_gate_keeps_two_runs_per_day():
-    """The four UTC crons must collapse to 06:00 and 18:00 local in both offsets."""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
 
-    la = ZoneInfo("America/Los_Angeles")
-    crons = [13, 14, 1, 2]
-    for day in ("2026-07-15", "2027-01-15"):
-        kept = [
-            datetime.fromisoformat(f"{day}T{h:02d}:10:00+00:00").astimezone(la).hour
-            for h in crons
-            if datetime.fromisoformat(f"{day}T{h:02d}:10:00+00:00").astimezone(la).hour
-            in (6, 18)
-        ]
-        assert sorted(kept) == [6, 18], (day, kept)
-
-
-def test_workflow_declares_those_four_crons():
+def test_workflow_declares_two_fixed_utc_crons():
+    # The four-cron DST gate was removed after real runs showed GitHub delays
+    # scheduled triggers by 30-120 minutes, so a wall-clock hour check skipped
+    # most runs. Two fixed UTC times are immune; local time drifting an hour
+    # across DST is harmless.
     import yaml
     with open(".github/workflows/scan.yml") as f:
         wf = yaml.safe_load(f)
     crons = {c["cron"] for c in wf[True]["schedule"]}
-    assert crons == {"10 13 * * *", "10 14 * * *", "10 01 * * *", "10 02 * * *"}
-    assert wf["jobs"]["scan"]["needs"] == "gate"
+    assert crons == {"10 13 * * *", "10 01 * * *"}
+    assert "gate" not in wf["jobs"]

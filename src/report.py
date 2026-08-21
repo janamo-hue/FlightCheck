@@ -20,17 +20,37 @@ from . import alerts, config, links, store
 W, H, PAD = 640, 120, 8
 
 
-def sparkline(points: list[tuple[str, float]]) -> str:
-    """Price over observation time, with the low marked."""
+def _days_to_departure(o) -> float:
+    from datetime import date, datetime
+    observed = datetime.fromisoformat(o.observed_at).date()
+    return (date.fromisoformat(o.depart) - observed).days
+
+
+def sparkline(points: list[tuple[float, float]]) -> str:
+    """Price against days to departure, most distant on the left, zero on
+    the right.
+
+    Observation order was the old x-axis, which made curves from different
+    date pairs incomparable: the same x meant "third time we looked" rather
+    than a distance from departure. With the calendar-anchored grid the same
+    dates are revisited on a fixed cadence, so days-to-departure is finally a
+    meaningful shared axis and curves can be read against each other, which
+    is the whole booking-curve question.
+    """
     if len(points) < 2:
         return '<p class="thin">Not enough history yet.</p>'
 
+    points = sorted(points, key=lambda p: -p[0])
     values = [p[1] for p in points]
     lo, hi = min(values), max(values)
     span = (hi - lo) or 1.0
+    d_max = max(p[0] for p in points)
+    d_min = min(p[0] for p in points)
+    d_span = (d_max - d_min) or 1.0
 
     def xy(i: int, v: float) -> tuple[float, float]:
-        x = PAD + i * (W - 2 * PAD) / (len(points) - 1)
+        dtd = points[i][0]
+        x = PAD + (d_max - dtd) * (W - 2 * PAD) / d_span
         y = PAD + (hi - v) * (H - 2 * PAD) / span
         return x, y
 
@@ -45,7 +65,8 @@ def sparkline(points: list[tuple[str, float]]) -> str:
                 vector-effect="non-scaling-stroke"/>
       <circle cx="{lx:.1f}" cy="{ly:.1f}" r="3.5" fill="#15803d"/>
     </svg>
-    <div class="axis"><span>{hi:,.0f}</span><span>low {lo:,.0f}</span></div>"""
+    <div class="axis"><span>{hi:,.0f} at {d_max:.0f}d out</span>
+      <span>low {lo:,.0f} &middot; right edge {d_min:.0f}d out</span></div>"""
 
 
 def build(days: int = 60) -> str:
@@ -124,7 +145,7 @@ def build(days: int = 60) -> str:
               {flights}
               <div class="thin">{len(obs_list)} observations, {trend}</div>
               {points}
-              {sparkline([(o.observed_at, o.price) for o in obs_list])}
+              {sparkline([(_days_to_departure(o), o.price) for o in obs_list])}
               <div class="links">{link_html}</div>
             </div>""")
 

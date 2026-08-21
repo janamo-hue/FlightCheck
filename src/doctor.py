@@ -73,6 +73,14 @@ def check_config(rep: Report):
                     f"start {route.window_start_days} is not before end {route.window_end_days}")
         if not route.one_way and not route.trip_lengths:
             rep.add(FAIL, f"{route.name}: trip_lengths", "round trip with no lengths set")
+        if (route.near_stride_days
+                and route.sweep_stride_days % route.near_stride_days):
+            rep.add(WARN, f"{route.name}: tier strides",
+                    f"sweep_stride_days {route.sweep_stride_days} is not a "
+                    f"multiple of near_stride_days {route.near_stride_days}, "
+                    f"so a date sampled in the far tier falls off the grid "
+                    f"when it crosses into the near tier and its history "
+                    f"breaks there.")
         if route.award_floor_points is None:
             rep.add(WARN, f"{route.name}: award floor",
                     "unset, so no redeem/pay verdict for this route")

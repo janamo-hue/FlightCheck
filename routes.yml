@@ -66,8 +66,9 @@ routes:
     destination: ABQ
     distance_miles: 1179
     award_floor_points: 7500     # 1,179 mi, inside the <=1,400 band
-    sweep_stride_days: 10
-    watchlist_size: 3
+    near_stride_days: 4          # every 4th day out to near_days (60)
+    sweep_stride_days: 12        # every 12th beyond; multiple of 4, so dates
+    watchlist_size: 8            # stay on the grid crossing the boundary
 
   - name: Seattle to New Orleans
     origin: SEA
@@ -76,5 +77,6 @@ routes:
     award_floor_points: 10000    # 2,083 mi, 18 mi under the 2,101 boundary.
                                  # BAND UNVERIFIED: this is a guess for the
                                  # 1,401-2,100 band. Confirm on the chart.
-    sweep_stride_days: 10
-    watchlist_size: 3
+    near_stride_days: 4
+    sweep_stride_days: 12
+    watchlist_size: 8

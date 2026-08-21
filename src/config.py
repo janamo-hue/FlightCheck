@@ -27,6 +27,12 @@ class Route:
     window_start_days: int = 14
     window_end_days: int = 180
     sweep_stride_days: int = 4
+    # Tiered sampling: dates within near_days of today use near_stride_days.
+    # Leave near_stride_days unset for a single-tier grid. Keep
+    # sweep_stride_days a multiple of near_stride_days so a date stays on the
+    # grid as it crosses the boundary.
+    near_days: int = 60
+    near_stride_days: int | None = None
     sweep_weekday: int = 6
     depart_weekdays: list[int] = field(default_factory=list)
     watchlist_size: int = 8
