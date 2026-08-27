@@ -45,9 +45,25 @@ def _links(alert: Alert) -> str:
     return "".join(out)
 
 
+def _is_target(a: Alert) -> bool:
+    return a.kind.startswith("target")
+
+
 def render(alerts: list[Alert]) -> tuple[str, str]:
+    targets = [a for a in alerts if _is_target(a)]
     spikes = [a for a in alerts if a.kind == "spike"]
-    if spikes:
+    if targets:
+        # Lead with the biggest margin under target, not the lowest price: a
+        # fare 80 under its target is better news than a cheaper route sitting
+        # 5 under its own.
+        best = max(targets, key=lambda a: (a.target_price or 0) - a.alert_price)
+        subject = (f"Under target: {best.route_name} {best.currency} "
+                   f"{best.alert_price:,.0f}")
+        if best.target_fare == "SAVER":
+            subject += " Saver"
+        if best.target_price:
+            subject += f" (target {best.target_price:,.0f})"
+    elif spikes:
         best = max(spikes, key=lambda a: a.cents_per_point or 0)
         subject = (f"Worth points: {best.route_name} "
                    f"{best.cents_per_point:.1f}c/pt at {best.currency} {best.price:,.0f}")
@@ -62,8 +78,17 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
         subject += f" +{len(alerts) - 1} more"
 
     rows = []
-    for a in sorted(alerts, key=lambda x: (x.kind != "spike", -(x.drop_pct or 0))):
+    for a in sorted(alerts, key=lambda x: (not _is_target(x), x.kind != "spike",
+                                           -(x.drop_pct or 0))):
         tags = []
+        if _is_target(a) and a.target_price is not None:
+            under = a.target_price - a.alert_price
+            rung = "Saver" if a.target_fare == "SAVER" else (a.branded_fare or "MAIN").title()
+            tags.append(f"{rung} at {a.currency} {a.alert_price:,.0f}, "
+                        f"{a.currency} {under:,.0f} under your "
+                        f"{a.currency} {a.target_price:,.0f} target")
+            if not a.observations:
+                tags.append("first time this date pair has been priced")
         if a.kind == "spike":
             if a.spike_pct is not None:
                 tags.append(f"{a.spike_pct:.0f}% above the median")
@@ -73,7 +98,9 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
             tags.append(f"{a.drop_pct:.0f}% below the {a.observations}-sample median")
         if a.all_time_low:
             tags.append("all-time low")
-        if not a.earns_points:
+        if a.target_fare == "SAVER":
+            tags.append("Saver earns no Atmos points")
+        elif not a.earns_points:
             tags.append(f"{a.branded_fare} fare, earns zero points")
         elif a.saver_premium is not None and a.saver_premium > 0:
             cpe = a.cost_per_point_earned
@@ -83,7 +110,15 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
                 note += f", {cpe:.1f}c per point earned"
             tags.append(note)
         dates = a.depart + (f" to {a.ret}" if a.ret else " (one way)")
-        baseline = f"{a.currency} {a.baseline:,.0f}" if a.baseline else "n/a"
+        # A Saver alert leads with the Saver fare, so the second line should
+        # show the MAIN fare it undercuts rather than a baseline that may not
+        # exist yet. Everything else keeps the baseline it was always showing.
+        if a.target_fare == "SAVER":
+            subline = f"MAIN {a.currency} {a.price:,.0f}"
+        elif a.baseline:
+            subline = f"baseline {a.currency} {a.baseline:,.0f}"
+        else:
+            subline = "no baseline yet"
 
         rows.append(
             f"""
@@ -94,8 +129,8 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
                 <div style="color:#a1a1aa;font-size:12px;">{html.escape(", ".join(a.flight_numbers))}</div>
               </td>
               <td style="padding:12px 8px;border-bottom:1px solid #e4e4e7;text-align:right;">
-                <div style="font-size:20px;font-weight:700;">{a.currency} {a.price:,.0f}</div>
-                <div style="color:#71717a;font-size:12px;">baseline {baseline}</div>
+                <div style="font-size:20px;font-weight:700;">{a.currency} {a.alert_price:,.0f}</div>
+                <div style="color:#71717a;font-size:12px;">{html.escape(subline)}</div>
                 <div style="color:{'#b45309' if a.kind == 'spike' else '#15803d'};font-size:12px;">
                   {html.escape(", ".join(tags))}</div>
                 <div style="font-size:12px;font-weight:600;">{html.escape(a.verdict or '')}</div>
@@ -108,8 +143,9 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
       <h2 style="margin:0 0 4px;">Alaska direct fare alerts</h2>
       <p style="color:#71717a;margin:0 0 16px;font-size:13px;">
         Nonstop Alaska-marketed fares only, read from alaskaair.com's own
-        results page. Saver fares are excluded where configured, since they earn
-        no Atmos points. Cents per point assumes saver space exists
+        results page. Saver is excluded from the priced fare where configured,
+        since it earns no Atmos points, but is still watched against its own
+        target and alerted on. Cents per point assumes saver space exists
         at the route's chart floor, which is the best case, not a quote. Check
         award space before acting on it.
       </p>

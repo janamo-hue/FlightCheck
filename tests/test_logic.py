@@ -526,3 +526,107 @@ def test_weekday_grid_is_week_anchored():
     assert all(date.fromisoformat(d).weekday() == 4 for d in a)
     inside = {d for d in a if "2026-09-01" < d < "2026-12-01"}
     assert inside <= b
+
+
+# --- absolute price targets -------------------------------------------------
+#
+# The point of these is that they work where the relative triggers cannot:
+# with no history at all, and on a fare that is cheap on every observation and
+# therefore never "drops".
+
+
+def _obs_with_saver(price, saver, days_ago=0):
+    o = obs(price, days_ago=days_ago)
+    o.saver_price = saver
+    return o
+
+
+def test_target_fires_with_no_history_at_all():
+    r = route(target_price=400)
+    a = evaluate(r, _obs_with_saver(380, 300), [], {}, NOW)
+    assert a is not None
+    assert a.kind == "target"
+    assert a.target_fare == "MAIN"
+    assert a.target_price == 400
+    assert a.alert_price == 380
+    assert a.observations == 0
+
+
+def test_target_ignores_min_observations():
+    """min_observations gates the relative triggers; it must not gate this."""
+    r = route(target_price=400, min_observations=99)
+    assert evaluate(r, _obs_with_saver(380, 300), [obs(380, 1)], {}, NOW) is not None
+
+
+def test_no_target_when_price_above_it():
+    r = route(target_price=350)
+    assert evaluate(r, _obs_with_saver(380, 300), [], {}, NOW) is None
+
+
+def test_target_fires_on_a_perfectly_flat_fare():
+    """The case the relative triggers are blind to: median == current == floor."""
+    r = route(target_price=400, drop_pct=15)
+    prior = [obs(397, days_ago=d) for d in range(1, 15)]
+    a = evaluate(r, _obs_with_saver(397, 297), prior, {}, NOW)
+    assert a is not None and a.kind == "target"
+    assert a.drop_pct == 0  # nothing moved, which is exactly the point
+
+
+def test_saver_target_fires_on_the_saver_rung():
+    r = route(saver_target_price=310)
+    a = evaluate(r, _obs_with_saver(500, 300), [], {}, NOW)
+    assert a is not None
+    assert a.kind == "target-saver"
+    assert a.target_fare == "SAVER"
+    assert a.alert_price == 300      # the Saver fare
+    assert a.price == 500            # MAIN is still carried for context
+
+
+def test_saver_wins_when_both_rungs_beat_their_targets():
+    r = route(target_price=600, saver_target_price=310)
+    a = evaluate(r, _obs_with_saver(500, 300), [], {}, NOW)
+    assert a.target_fare == "SAVER"
+
+
+def test_saver_target_ignored_when_no_saver_price_recorded():
+    r = route(saver_target_price=310)
+    assert evaluate(r, _obs_with_saver(500, None), [], {}, NOW) is None
+
+
+def test_target_takes_precedence_over_a_drop():
+    r = route(target_price=400, drop_pct=10, min_observations=3)
+    prior = [obs(600, days_ago=d) for d in range(1, 6)]
+    a = evaluate(r, _obs_with_saver(380, 300), prior, {}, NOW)
+    assert a.kind == "target"
+    assert a.drop_pct > 10          # the drop is still reported, just not the label
+
+
+def test_target_debounces_and_rearms_on_a_further_fall():
+    r = route(target_price=400, debounce_hours=48, realert_pct=5)
+    state = {}
+    first = evaluate(r, _obs_with_saver(380, 300), [], state, NOW)
+    record_alert(first, state, NOW)
+
+    same = evaluate(r, _obs_with_saver(379, 300), [], state, NOW + timedelta(hours=1))
+    assert same is None, "a penny lower should not re-alert inside the window"
+
+    lower = evaluate(r, _obs_with_saver(340, 300), [], state, NOW + timedelta(hours=1))
+    assert lower is not None, "a further fall past realert_pct should re-alert"
+
+
+def test_main_and_saver_targets_debounce_independently():
+    r = route(target_price=400, saver_target_price=310)
+    state = {}
+    saver_hit = evaluate(r, _obs_with_saver(500, 300), [], state, NOW)
+    assert saver_hit.kind == "target-saver"
+    record_alert(saver_hit, state, NOW)
+
+    # Saver is debounced, so MAIN coming into range should still speak.
+    main_hit = evaluate(r, _obs_with_saver(380, 300), [], state, NOW + timedelta(hours=1))
+    assert main_hit is not None
+    assert main_hit.kind == "target"
+
+
+def test_targets_unset_leaves_behaviour_unchanged():
+    r = route()
+    assert evaluate(r, _obs_with_saver(1, 1), [], {}, NOW) is None

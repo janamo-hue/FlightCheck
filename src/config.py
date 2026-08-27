@@ -47,6 +47,20 @@ class Route:
     debounce_hours: int = 48
     realert_pct: float = 5.0
 
+    # Absolute price targets. Unlike drop_pct and the all-time-low trigger,
+    # these compare against a number you chose rather than against the fare's
+    # own past, so they fire on the very first sighting of a date pair and do
+    # not care about min_observations. That matters because most tracked pairs
+    # never accumulate enough history to arm the relative triggers, and a fare
+    # that is cheap every single time it is checked never "drops" at all.
+    #
+    # target_price applies to the priced (usually MAIN) fare. Leave unset to
+    # disable. saver_target_price applies to the Saver rung on the same
+    # search, which is typically ~100 USD below MAIN and earns no Atmos
+    # points, so it is a separate knob with its own threshold.
+    target_price: float | None = None
+    saver_target_price: float | None = None
+
     # Points. award_floor_points is the saver starting price for this route's
     # distance band, read off Alaska's North America award chart. Leave it
     # unset to disable the redeem/pay analysis for the route.

@@ -46,3 +46,48 @@ def test_headline_is_the_biggest_drop():
     big = alert(route_name="Seattle to New Orleans", route_key="SEA-MSY", drop_pct=40.0)
     subject, _ = render([small, big])
     assert "Seattle to New Orleans" in subject
+
+
+def _target_alert(**kw):
+    base = dict(
+        kind="target", route_name="SEA to ABQ", route_key="SEA-ABQ",
+        depart="2026-10-17", ret="2026-10-24", price=380.0, currency="USD",
+        baseline=None, drop_pct=None, all_time_low=False,
+        flight_numbers=["AS327"], observations=0,
+        target_fare="MAIN", target_price=400.0, trigger_price=380.0,
+    )
+    base.update(kw)
+    return Alert(**base)
+
+
+def test_target_subject_leads_with_the_target():
+    subject, body = render([_target_alert()])
+    assert subject.startswith("Under target:")
+    assert "380" in subject and "400" in subject
+    assert "20 under" in body
+
+
+def test_saver_target_subject_and_row_use_the_saver_fare():
+    a = _target_alert(kind="target-saver", target_fare="SAVER",
+                      target_price=310.0, trigger_price=300.0,
+                      price=500.0, saver_price=300.0)
+    subject, body = render([a])
+    assert "Saver" in subject
+    assert "300" in subject           # the Saver fare leads
+    assert "MAIN USD 500" in body     # MAIN kept as context
+    assert "Saver earns no Atmos points" in body
+
+
+def test_target_rows_sort_above_other_kinds():
+    drop = _target_alert(kind="drop", route_name="SEA to MSY", target_fare=None,
+                         target_price=None, trigger_price=None,
+                         baseline=600.0, drop_pct=20.0, observations=5)
+    _, body = render([drop, _target_alert()])
+    assert body.index("SEA to ABQ") < body.index("SEA to MSY")
+
+
+def test_first_sighting_is_called_out():
+    _, body = render([_target_alert(observations=0)])
+    assert "first time this date pair has been priced" in body
+    _, body2 = render([_target_alert(observations=9)])
+    assert "first time this date pair has been priced" not in body2

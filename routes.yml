@@ -40,6 +40,16 @@ defaults:
   debounce_hours: 48       # suppress repeat alerts for the same date pair
   realert_pct: 5           # unless it drops a further this % below last alert
 
+  # Absolute price targets: alert when a fare is at or below this number,
+  # regardless of what it cost yesterday. These fire on the first sighting of
+  # a date pair and ignore min_observations, so they reach the ~75% of tracked
+  # pairs that never accumulate enough history to arm drop_pct or the
+  # all-time-low trigger.
+  #
+  # Set per route below, not here: a sensible target is a property of the
+  # route, not a default. Run `python -m src.targets --sweep` to see what a
+  # candidate value would have caught against stored history.
+
   # Points, for the redeem-or-pay call. See README for where the floor
   # numbers come from. Unset award_floor_points to switch this off.
   point_value_cents: 1.5   # what you reckon an Atmos point is worth
@@ -66,6 +76,12 @@ routes:
     destination: ABQ
     distance_miles: 1179
     award_floor_points: 7500     # 1,179 mi, inside the <=1,400 band
+    # Floors observed over 220 samples (2026-08): MAIN 397, SAVER 297, and
+    # nothing has ever priced below either. Targets sit ~5% under, so they stay
+    # silent until a fare appears that is genuinely new, rather than firing on
+    # the floor the route sits at 60% of the time.
+    target_price: 377
+    saver_target_price: 282
     near_stride_days: 4          # every 4th day out to near_days (60)
     sweep_stride_days: 12        # every 12th beyond; multiple of 4, so dates
     watchlist_size: 8            # stay on the grid crossing the boundary
@@ -77,6 +93,10 @@ routes:
     award_floor_points: 10000    # 2,083 mi, 18 mi under the 2,101 boundary.
                                  # BAND UNVERIFIED: this is a guess for the
                                  # 1,401-2,100 band. Confirm on the chart.
+    # Floors observed over 216 samples (2026-08): MAIN 487, SAVER 377. Same
+    # ~5%-under rule as ABQ.
+    target_price: 463
+    saver_target_price: 358
     near_stride_days: 4
     sweep_stride_days: 12
     watchlist_size: 8

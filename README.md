@@ -63,7 +63,51 @@ The 2,000/month figure is a self-imposed ceiling on page loads, not an API
 allowance. If a config projects over it, widen `sweep_stride_days`, shrink
 `watchlist_size`, or shorten `window_end_days`.
 
-## How it decides what is a drop
+## How it decides what is worth an email
+
+Two families of trigger, answering different questions.
+
+### Absolute targets: "is this cheap enough to book?"
+
+Set `target_price` (the priced, usually MAIN fare) and `saver_target_price`
+(the Saver rung on the same search) per route in `routes.yml`. When a fare is
+at or below its target, it alerts.
+
+These compare against a number you chose, not against the fare's own past, so
+they:
+
+- fire on the **first sighting** of a date pair, with no history at all,
+- ignore `min_observations` entirely,
+- work on a fare that is cheap on every observation and therefore never drops.
+
+That last case is the one the relative triggers below are structurally blind
+to, and it is the common case. On SEA-ABQ, over 220 observations, the median
+price equals the minimum price: the fare sits at its floor 60% of the time. Its
+trailing median is its current price, so the drop is always 0%, and it can
+never set a new low. It cannot alert, ever, no matter how long it runs.
+
+Saver gets its own knob because `exclude_saver` keeps it out of the *priced*
+fare (it earns no Atmos points) while it remains the cheapest way to actually
+fly the route, typically about 100 USD below MAIN. A Saver alert leads with the
+Saver fare and carries the MAIN fare alongside it for context.
+
+**Choosing a target.** Run `python -m src.targets --sweep` to replay stored
+history against candidate values before committing to one:
+
+```
+python -m src.targets            # what the configured targets would catch
+python -m src.targets --sweep    # what nearby values would catch
+```
+
+Expect a cliff rather than a curve. Alaska fares sit in discrete buckets, so on
+these routes nothing has ever priced below the floor and any target at the
+floor fires on most observations. The configured values sit about 5% under each
+observed floor, which means they are silent against all stored history by
+design: they exist to catch a fare that has not happened yet, not to describe
+the ones that have. If a target never fires for months, that is the intended
+behaviour, and `--sweep` will tell you what raising it would cost you in email.
+
+### Relative triggers: "has this moved?"
 
 Baseline is the **median** of the trailing `baseline_days` of observations for
 that exact route and date pair. Median rather than mean, so one fluke fare does
@@ -78,8 +122,16 @@ Two triggers:
    eight months ago mutes the trigger permanently.
 
 Both are gated by `min_observations`, so a brand new route stays quiet until it
-has history. After an alert fires, that date pair is silent for
-`debounce_hours` unless the price falls a further `realert_pct`.
+has history. Targets are not gated this way.
+
+After an alert fires, that date pair is silent for `debounce_hours` unless the
+price falls a further `realert_pct`. Debounce is keyed by trigger kind, and
+MAIN and Saver targets debounce independently: a Saver alert going quiet does
+not stop MAIN from speaking when it comes into range.
+
+When more than one trigger fires at once, `target` wins the label, because "this
+is under the price you would pay" is more actionable than "this moved". The drop
+percentage and baseline are still reported on the alert.
 
 ## Points: redeem or pay
 
@@ -274,10 +326,12 @@ Once it comes back clean:
 python -m src.budget
 python -m src.scan --sweep --dry-run     # prices everything, writes nothing
 python -m src.scan --sweep               # first real run, seeds baselines
+python -m src.targets --sweep            # tune targets once history exists
 ```
 
-Alerts stay quiet for the first few days until each date pair has
-`min_observations` of history. That is intended.
+The relative alerts stay quiet for the first few days until each date pair has
+`min_observations` of history. That is intended. Target alerts do not wait: if
+a fare is under its target on the very first scan, it mails you.
 
 ## CI
 
