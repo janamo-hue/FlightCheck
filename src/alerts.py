@@ -16,10 +16,18 @@ observation, so its median equals its current price, it never sets a new low,
 and it never alerts. Target triggers take precedence in the kind ordering,
 since "this is under the price you would pay" is more actionable than "this
 moved".
+
+The cross-date trigger (cheapest) is a third question again: not "is this
+under my number" and not "has this moved", but "of all the dates I could fly
+this route right now, is this one of the cheapest". It ranks the fare against
+the most recent price of every OTHER date pair on the route, so it also needs
+no history for the pair being priced. It is the trigger that finds a date you
+were not already thinking about.
 """
 
 from __future__ import annotations
 
+import math
 import statistics
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -56,6 +64,12 @@ class Alert:
     target_fare: str | None = None
     target_price: float | None = None
     trigger_price: float | None = None
+    # Cross-date ranking context: where this fare sits among the other dates
+    # currently priced on the same route.
+    cheapest_pct: float | None = None      # the percentile band it cleared
+    cheapest_cutoff: float | None = None   # price at that percentile
+    market_pairs: int | None = None        # how many other dates it beat
+    market_median: float | None = None
 
     @property
     def verdict(self) -> str | None:
@@ -127,6 +141,41 @@ def cents_per_point(price: float, route: Route) -> float | None:
     return price / route.award_floor_points * 100
 
 
+def market_prices(
+    history: list[Observation], route: Route, current: Observation, asof: datetime
+) -> list[float]:
+    """Latest price of every OTHER live date pair on this route.
+
+    One price per pair, not one per observation, otherwise a pair that happens
+    to be re-checked twice a day would count eight times as much as one swept
+    weekly and the percentile would describe the watchlist rather than the
+    route.
+
+    The pair being priced is excluded: the question is whether this date is
+    cheap compared to the alternatives, and a date cannot be an alternative to
+    itself. Departures already in the past are excluded too, since you cannot
+    book them.
+    """
+    cutoff = (asof - timedelta(days=route.cheapest_days)).isoformat()
+    today = asof.date().isoformat()
+    latest: dict[str, Observation] = {}
+    for o in history:
+        if o.route != route.key or o.pair == current.pair:
+            continue
+        if o.observed_at < cutoff or o.depart < today:
+            continue
+        seen = latest.get(o.pair)
+        if seen is None or o.observed_at > seen.observed_at:
+            latest[o.pair] = o
+    return sorted(o.price for o in latest.values())
+
+
+def _percentile(sorted_prices: list[float], pct: float) -> float:
+    """Nearest-rank percentile. Small samples make interpolation a fiction."""
+    rank = max(1, math.ceil(pct / 100 * len(sorted_prices)))
+    return sorted_prices[rank - 1]
+
+
 def baseline_for(prior: list[Observation], route: Route, asof: datetime) -> float | None:
     cutoff = asof - timedelta(days=route.baseline_days)
     window = [o.price for o in prior if _parse(o.observed_at) >= cutoff]
@@ -141,7 +190,10 @@ def evaluate(
     prior: list[Observation],
     state: dict,
     asof: datetime | None = None,
+    market: list[float] | None = None,
 ) -> Alert | None:
+    """`market` is the sorted latest price of every other live pair on this
+    route, from market_prices(). Omit it to skip the cross-date trigger."""
     asof = asof or datetime.now(UTC)
 
     # Absolute targets are checked before the history guard below, because
@@ -161,7 +213,35 @@ def evaluate(
         target_fare, target_threshold, trigger_price = fare, threshold, value
         break
 
-    if not prior and target_fare is None:
+    # Cross-date ranking. Like targets, this needs no history for the pair
+    # being priced, only enough other pairs to rank it against.
+    cheapest_cutoff = market_median = None
+    is_cheapest = False
+    if (
+        route.cheapest_pct is not None
+        and market
+        and len(market) >= route.cheapest_min_pairs
+    ):
+        cheapest_cutoff = _percentile(market, route.cheapest_pct)
+        market_median = statistics.median(market)
+        is_cheapest = current.price <= cheapest_cutoff
+
+        # Fire on ENTRY to the cheap band, not on residence in it. Most dates
+        # that rank cheap rank cheap every time they are priced, because fares
+        # sit in discrete buckets and the ones at the floor stay there. Without
+        # this, every floor-priced date would mail again the moment debounce
+        # expired, forever. A pair with no history at all is a new date, and a
+        # new date arriving already cheap is exactly what this is for.
+        if is_cheapest and prior:
+            was = max(prior, key=lambda o: o.observed_at).price
+            if was <= cheapest_cutoff:
+                is_cheapest = False
+
+        if is_cheapest and _debounced(route, current, state, asof, "cheapest",
+                                      current.price):
+            is_cheapest = False
+
+    if not prior and target_fare is None and not is_cheapest:
         return None
 
     baseline = baseline_for(prior, route, asof)
@@ -206,16 +286,20 @@ def evaluate(
             spike = rise
             triggered = True
 
-    if target_fare is not None:
+    if target_fare is not None or is_cheapest:
         triggered = True
 
     if not triggered:
         return None
 
     # Target wins the label: it is the one that says "book this", where the
-    # others say "this moved".
+    # others say "this moved". Cross-date ranking sits just under it, because
+    # "one of the cheapest dates available" is still a reason to act, where a
+    # drop or a spike is only a reason to look.
     if target_fare is not None:
         kind = _target_kind(target_fare)
+    elif is_cheapest:
+        kind = "cheapest"
     elif spike is not None:
         kind = "spike"
     elif drop_pct is not None and drop_pct >= route.drop_pct:
@@ -223,9 +307,9 @@ def evaluate(
     else:
         kind = "low"
 
-    # Target kinds already cleared debounce above, on the rung that triggered.
-    if target_fare is None and _debounced(route, current, state, asof, kind,
-                                          current.price):
+    # Target and cheapest kinds already cleared debounce above.
+    if (target_fare is None and not is_cheapest
+            and _debounced(route, current, state, asof, kind, current.price)):
         return None
 
     return Alert(
@@ -242,6 +326,10 @@ def evaluate(
         target_fare=target_fare,
         target_price=target_threshold,
         trigger_price=trigger_price,
+        cheapest_pct=route.cheapest_pct if is_cheapest else None,
+        cheapest_cutoff=cheapest_cutoff if is_cheapest else None,
+        market_pairs=len(market) if market else None,
+        market_median=market_median,
         route_name=route.name,
         route_key=route.key,
         depart=current.depart,

@@ -99,16 +99,23 @@ def sweep_tasks(route: Route, today: date) -> list[Task]:
     return tasks
 
 
+def sweeps_per_month(route: Route) -> float:
+    """How often a full sweep cycle runs, per month."""
+    if route.sweep_interval_days:
+        return 30 / route.sweep_interval_days
+    return 4.35  # weekly
+
+
 def route_monthly_loads(route: Route, runs_per_day: int, today: date) -> float:
     """Projected page loads/month for one route.
 
-    Sweeps stay weekly (4.35 weeks/month); only the daily watchlist re-check
-    scales with runs_per_day. Single-sourced here so src.budget and src.doctor
-    cannot drift apart.
+    Only the watchlist re-check scales with runs_per_day; sweep cost scales
+    with sweep_interval_days instead. Single-sourced here so src.budget and
+    src.doctor cannot drift apart.
     """
     sweep = len(sweep_tasks(route, today))
     daily = min(route.watchlist_size, sweep)
-    return sweep * 4.35 + daily * 30 * runs_per_day
+    return sweep * sweeps_per_month(route) + daily * 30 * runs_per_day
 
 
 def projected_monthly_loads(routes: list[Route], runs_per_day: int, today: date) -> float:
@@ -119,10 +126,16 @@ def should_sweep(route: Route, today: date, state: dict) -> bool:
     last = state.get("last_sweep", {}).get(route.key)
     if last is None:
         return True
+    elapsed = (today - date.fromisoformat(last)).days
+    if route.sweep_interval_days:
+        # Interval sweeping: cadence is the point, so the weekday is ignored.
+        # A weekly sweep cannot see a sale that opens and closes inside the
+        # week, and most of them do.
+        return elapsed >= route.sweep_interval_days
     if today.weekday() == route.sweep_weekday:
         return last != today.isoformat()
     # Safety net: never let a route go more than 10 days without a sweep.
-    return (today - date.fromisoformat(last)).days >= 10
+    return elapsed >= 10
 
 
 def open_sweep(route: Route, today: date, state: dict) -> list[str]:

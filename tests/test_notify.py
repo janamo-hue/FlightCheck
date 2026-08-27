@@ -91,3 +91,31 @@ def test_first_sighting_is_called_out():
     assert "first time this date pair has been priced" in body
     _, body2 = render([_target_alert(observations=9)])
     assert "first time this date pair has been priced" not in body2
+
+
+def test_cheapest_subject_and_row():
+    a = Alert(
+        kind="cheapest", route_name="SEA to MSY", route_key="SEA-MSY",
+        depart="2027-01-05", ret="2027-01-12", price=487.0, currency="USD",
+        baseline=None, drop_pct=None, all_time_low=False,
+        flight_numbers=["AS1"], observations=0,
+        cheapest_pct=10.0, cheapest_cutoff=497.0, market_pairs=73,
+        market_median=537.0,
+    )
+    subject, body = render([a])
+    assert subject.startswith("Cheapest dates:")
+    assert "2027-01-05" in subject
+    assert "cheapest 10% of 73 other dates" in body
+    assert "route median right now USD 537" in body
+
+
+def test_target_rows_still_outrank_cheapest_rows():
+    cheap = Alert(
+        kind="cheapest", route_name="SEA to MSY", route_key="SEA-MSY",
+        depart="2027-01-05", ret="2027-01-12", price=487.0, currency="USD",
+        baseline=None, drop_pct=None, all_time_low=False,
+        flight_numbers=["AS1"], observations=0,
+        cheapest_pct=10.0, cheapest_cutoff=497.0, market_pairs=73,
+    )
+    _, body = render([cheap, _target_alert()])
+    assert body.index("SEA to ABQ") < body.index("SEA to MSY")

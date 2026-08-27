@@ -630,3 +630,113 @@ def test_main_and_saver_targets_debounce_independently():
 def test_targets_unset_leaves_behaviour_unchanged():
     r = route()
     assert evaluate(r, _obs_with_saver(1, 1), [], {}, NOW) is None
+
+
+# --- cross-date ranking -----------------------------------------------------
+
+
+def _market(*prices):
+    return sorted(prices)
+
+
+def test_cheapest_fires_on_a_new_date_that_arrives_cheap():
+    r = route(cheapest_pct=10, cheapest_min_pairs=5)
+    mkt = _market(*range(400, 420))          # 20 other dates, 400..419
+    a = evaluate(r, obs(395), [], {}, NOW, mkt)
+    assert a is not None
+    assert a.kind == "cheapest"
+    assert a.cheapest_pct == 10
+    assert a.market_pairs == 20
+    assert a.cheapest_cutoff == 401           # nearest-rank 10th percentile
+
+
+def test_cheapest_silent_when_fare_is_mid_market():
+    r = route(cheapest_pct=10, cheapest_min_pairs=5)
+    assert evaluate(r, obs(410), [], {}, NOW, _market(*range(400, 420))) is None
+
+
+def test_cheapest_needs_enough_other_pairs_to_rank_against():
+    r = route(cheapest_pct=10, cheapest_min_pairs=10)
+    assert evaluate(r, obs(1), [], {}, NOW, _market(400, 401, 402)) is None
+
+
+def test_cheapest_fires_on_entry_not_on_residence():
+    """A date that was already cheap last time is not news this time."""
+    r = route(cheapest_pct=10, cheapest_min_pairs=5)
+    mkt = _market(*range(400, 420))
+    already_cheap = [obs(396, days_ago=1)]
+    assert evaluate(r, obs(395), already_cheap, {}, NOW, mkt) is None
+
+    was_expensive = [obs(500, days_ago=1)]
+    a = evaluate(r, obs(395), was_expensive, {}, NOW, mkt)
+    assert a is not None and a.kind == "cheapest"
+
+
+def test_cheapest_disabled_when_unset():
+    assert evaluate(route(), obs(1), [], {}, NOW, _market(*range(400, 420))) is None
+
+
+def test_target_outranks_cheapest():
+    r = route(cheapest_pct=10, cheapest_min_pairs=5, target_price=400)
+    a = evaluate(r, obs(395), [], {}, NOW, _market(*range(400, 420)))
+    assert a.kind == "target"
+
+
+def test_market_prices_takes_one_latest_price_per_pair():
+    """Otherwise a twice-daily watchlist pair outvotes a weekly swept one."""
+    from src.alerts import market_prices
+    r = route()
+    hot = [obs(300, days_ago=d, depart="2026-10-01", ret="2026-10-08")
+           for d in range(6)]
+    cold = [obs(900, days_ago=3, depart="2026-11-01", ret="2026-11-08")]
+    current = obs(500, depart="2026-12-01", ret="2026-12-08")
+    prices = market_prices(hot + cold, r, current, NOW)
+    assert prices == [300.0, 900.0]
+
+
+def test_market_prices_excludes_the_pair_being_priced():
+    from src.alerts import market_prices
+    current = obs(500, depart="2026-10-01", ret="2026-10-08")
+    same_pair = [obs(500, days_ago=1, depart="2026-10-01", ret="2026-10-08")]
+    other = [obs(700, days_ago=1, depart="2026-11-01", ret="2026-11-08")]
+    assert market_prices(same_pair + other, route(), current, NOW) == [700.0]
+
+
+def test_market_prices_drops_departures_in_the_past():
+    from src.alerts import market_prices
+    past = [obs(100, days_ago=1, depart="2026-07-01", ret="2026-07-08")]
+    future = [obs(700, days_ago=1, depart="2026-11-01", ret="2026-11-08")]
+    current = obs(500, depart="2026-12-01", ret="2026-12-08")
+    assert market_prices(past + future, route(), current, NOW) == [700.0]
+
+
+# --- sweep cadence ----------------------------------------------------------
+
+
+def test_sweep_interval_overrides_the_weekday():
+    r = route(sweep_interval_days=3, sweep_weekday=6)
+    state = {"last_sweep": {r.key: "2026-08-02"}}   # a Sunday
+    assert not should_sweep(r, date(2026, 8, 4), state)   # 2 days later
+    assert should_sweep(r, date(2026, 8, 5), state)       # 3 days later
+
+
+def test_weekday_sweeping_still_works_when_interval_unset():
+    r = route(sweep_weekday=6)
+    state = {"last_sweep": {r.key: "2026-08-02"}}
+    assert not should_sweep(r, date(2026, 8, 5), state)   # a Wednesday
+    assert should_sweep(r, date(2026, 8, 9), state)       # next Sunday
+
+
+def test_interval_sweeping_raises_the_monthly_projection():
+    from src.planner import route_monthly_loads, sweeps_per_month
+    weekly = route()
+    fast = route(sweep_interval_days=3)
+    assert sweeps_per_month(weekly) == 4.35
+    assert sweeps_per_month(fast) == 10
+    assert route_monthly_loads(fast, 2, TODAY) > route_monthly_loads(weekly, 2, TODAY)
+
+
+def test_multiple_trip_lengths_multiply_the_sweep():
+    one = len(sweep_tasks(route(trip_lengths=[7]), TODAY))
+    three = len(sweep_tasks(route(trip_lengths=[5, 7, 10]), TODAY))
+    assert three == 3 * one

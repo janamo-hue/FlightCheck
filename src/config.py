@@ -34,6 +34,10 @@ class Route:
     near_days: int = 60
     near_stride_days: int | None = None
     sweep_weekday: int = 6
+    # Sweep every N days instead of on a fixed weekday. A weekly sweep cannot
+    # see a fare sale that opens and closes inside the week, which is most of
+    # them. When set, this overrides sweep_weekday.
+    sweep_interval_days: int | None = None
     depart_weekdays: list[int] = field(default_factory=list)
     watchlist_size: int = 8
     trip_lengths: list[int] = field(default_factory=lambda: [7])
@@ -60,6 +64,20 @@ class Route:
     # points, so it is a separate knob with its own threshold.
     target_price: float | None = None
     saver_target_price: float | None = None
+
+    # Cross-date ranking: alert when a fare is in the cheapest cheapest_pct of
+    # the OTHER date pairs currently visible on the same route. This is the
+    # third question the other triggers do not ask. Targets ask "is this under
+    # a number I picked", the relative triggers ask "is this cheaper than it
+    # used to be", and this asks "is this one of the cheapest dates I could
+    # fly right now", which is what actually decides whether you book.
+    #
+    # It needs no history for the pair being priced, only a spread of other
+    # pairs to rank against, so it works on a date's first sighting. Set to
+    # None to disable.
+    cheapest_pct: float | None = None
+    cheapest_days: int = 30        # ignore observations staler than this
+    cheapest_min_pairs: int = 8    # too few pairs and a percentile is noise
 
     # Points. award_floor_points is the saver starting price for this route's
     # distance band, read off Alaska's North America award chart. Leave it

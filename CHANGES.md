@@ -18,3 +18,12 @@
 2026-08-27 [code] alerts: target kind takes precedence over drop/low/spike; MAIN and Saver debounce independently; _debounced and record_alert now key off the rung that triggered rather than the MAIN price.
 2026-08-27 [code] Added src/targets.py, a read-only tuner that replays history.jsonl against configured and candidate targets.
 2026-08-27 [decision] Targets set ~5% under each observed floor (ABQ 377/282, MSY 463/358), so they are silent against all stored history by design. Fares sit in discrete buckets: any target at the floor would fire on 60% of observations.
+
+2026-08-27 [feat] alerts: added cross-date ranking (cheapest_pct). Ranks a fare against the latest price of every OTHER live pair on the route, so it flags a cheap date on first sighting with no history for that date.
+2026-08-27 [code] alerts: cheapest fires on ENTRY to the cheap band, not residence. Fares sit in discrete buckets so floor-priced dates rank cheap every run; without this they would re-mail forever. Replay: 10 standing-cheap dates per route becomes 4-6 alerts.
+2026-08-27 [code] alerts: market_prices takes one latest price per pair, excludes the pair being priced and past departures. Per-observation counting would let twice-daily watchlist pairs dominate the percentile.
+2026-08-27 [fix] scan: refresh_watchlist ranks on most recent price, not cheapest ever seen. The old ranking ratcheted, pinning any pair that dipped once regardless of its current price.
+2026-08-27 [scope] routes: watchlist_size 8 -> 3. At 8 it was ~60% of all observations re-pricing known-floor fares twice a day; a sale appears on dates you are not watching.
+2026-08-27 [feat] planner: sweep_interval_days overrides sweep_weekday. Set to 3: a weekly sweep cannot see a sale that opens and closes inside the week.
+2026-08-27 [scope] routes: trip_lengths [7] -> [5,7,10]. A single fixed length was the narrowest slice of the fare space; fares are cheap on specific outbound/return combinations.
+2026-08-27 [decision] Budget: modelled 8 configurations against the 2,000/month ceiling. Chose 3 lengths + 3-day sweeps + watchlist 3 on the existing date grid = 1,620/month (81%). Trip lengths, cadence and date density draw on one ceiling and cannot all be raised.

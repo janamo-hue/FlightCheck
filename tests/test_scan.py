@@ -65,3 +65,33 @@ def test_occasional_failure_is_tolerated(sandbox, monkeypatch):
 def test_majority_failure_trips_the_guard(sandbox, monkeypatch):
     assert run(monkeypatch, Client(fail_every=2)) == 0   # exactly 50%, tolerated
     assert scan.MAX_FAILURE_RATE == 0.5
+
+
+def test_watchlist_ranks_on_latest_price_not_cheapest_ever():
+    """A pair that dipped once used to be pinned to the watchlist forever."""
+    from datetime import date
+
+    from src.config import Route
+    from src.scan import refresh_watchlist
+    from src.store import Observation
+
+    r = Route(name="SEA to SAN", origin="SEA", destination="SAN",
+              watchlist_size=2, window_start_days=14)
+    today = date(2026, 8, 2)
+
+    def o(pair_depart, price, at):
+        return Observation(route="SEA-SAN", depart=pair_depart, ret=None,
+                           price=price, currency="USD", flight_numbers=["AS1"],
+                           observed_at=at)
+
+    history = [
+        # dipped once long ago, expensive now
+        o("2026-10-01", 200, "2026-07-01T00:00:00+00:00"),
+        o("2026-10-01", 900, "2026-08-01T00:00:00+00:00"),
+        # steadily cheap now
+        o("2026-10-05", 300, "2026-08-01T00:00:00+00:00"),
+        o("2026-10-09", 400, "2026-08-01T00:00:00+00:00"),
+    ]
+    state = {}
+    refresh_watchlist(r, history, state, today)
+    assert state["watchlists"]["SEA-SAN"] == ["2026-10-05|", "2026-10-09|"]

@@ -19,17 +19,27 @@ MAX_FAILURE_RATE = 0.5
 
 
 def refresh_watchlist(route, history, state, today):
-    """Rank this route's live date pairs by cheapest price seen and keep top K."""
+    """Rank this route's live date pairs by their MOST RECENT price, top K.
+
+    This used to rank on the cheapest price ever seen, which ratcheted: a pair
+    that printed low once stayed on the watchlist forever regardless of what it
+    cost now, and the list filled with fares already known to be at the floor.
+    Re-pricing those twice a day mostly confirmed that a cheap fare was still
+    cheap. Ranking on the latest price lets a pair fall off when it rises, so
+    the slots follow what is actually cheap today.
+    """
     horizon = today.toordinal() + route.window_start_days
-    best: dict[str, float] = {}
+    latest: dict[str, tuple[str, float]] = {}
     for obs in history:
         if obs.route != route.key:
             continue
         if date.fromisoformat(obs.depart).toordinal() < horizon:
             continue
-        best[obs.pair] = min(best.get(obs.pair, float("inf")), obs.price)
+        seen = latest.get(obs.pair)
+        if seen is None or obs.observed_at > seen[0]:
+            latest[obs.pair] = (obs.observed_at, obs.price)
 
-    ranked = sorted(best, key=lambda p: best[p])[: route.watchlist_size]
+    ranked = sorted(latest, key=lambda p: latest[p][1])[: route.watchlist_size]
     state.setdefault("watchlists", {})[route.key] = ranked
 
 
@@ -146,7 +156,8 @@ def main(argv=None) -> int:
                  task.route.key, task.depart, obs.currency, obs.price)
 
         prior = buckets.get((task.route.key, obs.pair), [])
-        alert = alerting.evaluate(task.route, obs, prior, state, asof)
+        market = alerting.market_prices(history, task.route, obs, asof)
+        alert = alerting.evaluate(task.route, obs, prior, state, asof, market)
         if alert:
             triggered.append(alert)
             alerting.record_alert(alert, state, asof)

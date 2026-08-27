@@ -51,6 +51,7 @@ def _is_target(a: Alert) -> bool:
 
 def render(alerts: list[Alert]) -> tuple[str, str]:
     targets = [a for a in alerts if _is_target(a)]
+    cheapest = [a for a in alerts if a.kind == "cheapest"]
     spikes = [a for a in alerts if a.kind == "spike"]
     if targets:
         # Lead with the biggest margin under target, not the lowest price: a
@@ -63,6 +64,10 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
             subject += " Saver"
         if best.target_price:
             subject += f" (target {best.target_price:,.0f})"
+    elif cheapest:
+        best = min(cheapest, key=lambda a: a.alert_price)
+        subject = (f"Cheapest dates: {best.route_name} {best.currency} "
+                   f"{best.alert_price:,.0f} on {best.depart}")
     elif spikes:
         best = max(spikes, key=lambda a: a.cents_per_point or 0)
         subject = (f"Worth points: {best.route_name} "
@@ -78,9 +83,17 @@ def render(alerts: list[Alert]) -> tuple[str, str]:
         subject += f" +{len(alerts) - 1} more"
 
     rows = []
-    for a in sorted(alerts, key=lambda x: (not _is_target(x), x.kind != "spike",
+    for a in sorted(alerts, key=lambda x: (not _is_target(x),
+                                           x.kind != "cheapest",
+                                           x.kind != "spike",
                                            -(x.drop_pct or 0))):
         tags = []
+        if a.kind == "cheapest" and a.cheapest_pct is not None:
+            tags.append(f"in the cheapest {a.cheapest_pct:.0f}% of "
+                        f"{a.market_pairs} other dates priced on this route")
+            if a.market_median:
+                tags.append(f"route median right now {a.currency} "
+                            f"{a.market_median:,.0f}")
         if _is_target(a) and a.target_price is not None:
             under = a.target_price - a.alert_price
             rung = "Saver" if a.target_fare == "SAVER" else (a.branded_fare or "MAIN").title()

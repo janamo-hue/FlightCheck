@@ -31,13 +31,29 @@ necessary nor unobtrusive. Instead there are two tiers:
 
 | tier | cadence | what it covers |
 | --- | --- | --- |
-| sweep | weekly, one route per weekday | the full window at `sweep_stride_days` intervals |
-| watchlist | every run | the `watchlist_size` cheapest date pairs the last sweep found |
+| sweep | every `sweep_interval_days` | the full window at `sweep_stride_days` intervals, for every length in `trip_lengths` |
+| watchlist | every run | the `watchlist_size` cheapest date pairs, ranked by their **most recent** price |
 
-The sweep spots slow drift out in the far window. The watchlist catches fast
-drops on the dates you would actually book. Watchlist tasks are queued first, so
-if a run hits the per-run budget the sweep is what gets truncated, not the dates
-you care about.
+The sweep finds dates you were not already watching, which is where a sale
+appears by definition. The watchlist catches fast drops on the handful of dates
+already known to be cheap. Watchlist tasks are queued first, so if a run hits the
+per-run budget the sweep is what gets truncated, not the dates you care about.
+
+**The balance between the two has changed.** At `watchlist_size: 8` the
+watchlist consumed about 60% of all observations re-pricing fares already known
+to be at the floor, twice a day, which mostly established that a cheap fare was
+still cheap. It is now 3. It also used to rank on the cheapest price *ever*
+seen, which ratcheted: a pair that dipped once stayed pinned regardless of its
+price today. It now ranks on the latest price, so a pair falls off when it rises.
+
+**Sweeps are no longer weekly.** `sweep_interval_days: 3` overrides
+`sweep_weekday`, because a weekly sweep cannot see a fare sale that opens and
+closes inside the week, and most of them do.
+
+**`trip_lengths` is no longer a single value.** Pricing only exact-7-day trips
+was the narrowest possible slice of the fare space, since fares are cheap
+because of a specific outbound/return combination. Three lengths cost 3x the
+sweep, paid for by the watchlist cut and absorbed by the ceiling.
 
 A sweep that does not fit in one run is **resumed, not dropped**. The pairs
 still owed live in `state.json` under `sweep_cycles`, and `last_sweep` is only
@@ -51,17 +67,25 @@ so `[4]` with a stride of 2 means every second Friday.
 Run `python -m src.budget` before adding routes:
 
 ```
-route                          sweep   per run  per month
-Seattle to Albuquerque            17        3        254
-Seattle to New Orleans            17        3        254
-total                                                508
+route                          sweep  per run  per month
+Seattle to Albuquerque            63        3        810
+Seattle to New Orleans            63        3        810
+total                                              1,620
 
-2 run(s)/day. Page-load budget: 2,000/month. Projected use: 25%.
+2 run(s)/day. Page-load budget: 2,000/month. Projected use: 81%.
 ```
 
 The 2,000/month figure is a self-imposed ceiling on page loads, not an API
 allowance. If a config projects over it, widen `sweep_stride_days`, shrink
-`watchlist_size`, or shorten `window_end_days`.
+`watchlist_size`, shorten `window_end_days`, or drop a trip length.
+
+These three knobs (trip lengths, sweep cadence, date density) all draw on the
+same ceiling and cannot all be raised. The current setting buys three trip
+lengths and a 3-day cadence by keeping the watchlist small; widening the date
+grid instead would cost one of the other two. A full sweep is now 126 page loads
+across both routes against a `daily_call_budget` of 120, so a cycle spans two
+runs out of the six available per interval. That is by design and the backlog is
+resumed, not dropped.
 
 ## How it decides what is worth an email
 
@@ -107,6 +131,31 @@ design: they exist to catch a fare that has not happened yet, not to describe
 the ones that have. If a target never fires for months, that is the intended
 behaviour, and `--sweep` will tell you what raising it would cost you in email.
 
+### Cross-date ranking: "is this one of the cheapest dates I could fly?"
+
+Set `cheapest_pct` per route. A fare alerts when it lands in the cheapest N% of
+the **other** date pairs currently priced on the same route.
+
+Three details make this behave:
+
+- **One price per pair, not per observation.** The watchlist re-prices a few
+  pairs twice a day while a swept date is seen once every few days, so counting
+  observations would make the percentile describe the watchlist rather than the
+  route.
+- **The pair being priced is excluded.** A date cannot be an alternative to
+  itself.
+- **It fires on entry, not residence.** Fares sit in discrete buckets, and a
+  date at the floor ranks cheap every single time it is priced. Without an entry
+  rule every floor-priced date would mail again the moment debounce expired,
+  forever. A pair with no history is treated as entering, because a date
+  arriving already cheap is precisely the thing worth knowing.
+
+Replayed against stored history, this flags about 4 to 6 dates per route rather
+than the ~10 that are standing-cheap at any moment.
+
+`cheapest_days` bounds staleness and `cheapest_min_pairs` refuses to compute a
+percentile from too small a sample.
+
 ### Relative triggers: "has this moved?"
 
 Baseline is the **median** of the trailing `baseline_days` of observations for
@@ -129,9 +178,9 @@ price falls a further `realert_pct`. Debounce is keyed by trigger kind, and
 MAIN and Saver targets debounce independently: a Saver alert going quiet does
 not stop MAIN from speaking when it comes into range.
 
-When more than one trigger fires at once, `target` wins the label, because "this
-is under the price you would pay" is more actionable than "this moved". The drop
-percentage and baseline are still reported on the alert.
+When more than one trigger fires at once the label goes to the most actionable:
+`target`, then `cheapest`, then `spike`, `drop`, `low`. The drop percentage and
+baseline are still reported on the alert whatever the label.
 
 ## Points: redeem or pay
 

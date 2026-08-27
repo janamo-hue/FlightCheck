@@ -17,18 +17,39 @@ defaults:
   window_start_days: 14
   window_end_days: 180
 
-  # Deep sweep: sample every Nth day across the window, on sweep_weekday only.
+  # Deep sweep: sample every Nth day across the window.
   sweep_stride_days: 4
-  sweep_weekday: 6         # 0=Mon ... 6=Sun
+  sweep_weekday: 6         # 0=Mon ... 6=Sun; ignored when sweep_interval_days set
+  # Sweep every 3 days rather than weekly. A weekly sweep cannot see a fare
+  # sale that opens and closes inside the week, which is most of them.
+  sweep_interval_days: 3
   # Optional: restrict sampled departures to these weekdays. Empty = all.
   depart_weekdays: []
 
-  # Daily watchlist: re-check the K cheapest date pairs found in the last sweep.
-  watchlist_size: 8
+  # Daily watchlist: re-check the K cheapest date pairs found in the last sweep,
+  # ranked by their most recent price.
+  #
+  # Cut from 8 to 3. At 8 it consumed about 60% of every observation re-pricing
+  # fares already known to be at the floor, twice a day, which mostly confirmed
+  # that a cheap fare was still cheap. A sale by definition appears on a date
+  # you were not watching, so the budget is better spent sweeping more dates.
+  watchlist_size: 3
 
   # Round-trip lengths to price. Set one_way: true to ignore.
-  trip_lengths: [7]
+  #
+  # A single fixed length was the narrowest possible slice of the fare space:
+  # fares are cheap because of a specific outbound/return combination, so
+  # pricing only exact-7-day trips hid most of what is bookable. Three lengths
+  # cost 3x the sweep, paid for by a wider watchlist cut and interval sweeps.
+  trip_lengths: [5, 7, 10]
   one_way: false
+
+  # Cross-date ranking: alert when a fare is in the cheapest 10% of the other
+  # dates currently priced on the same route. Needs no history for the date
+  # being priced, so it can flag a departure the first time it is ever seen.
+  cheapest_pct: 10
+  cheapest_days: 30
+  cheapest_min_pairs: 10
 
   # Alerting
   drop_pct: 15             # alert when price falls this % below baseline
@@ -84,7 +105,7 @@ routes:
     saver_target_price: 282
     near_stride_days: 4          # every 4th day out to near_days (60)
     sweep_stride_days: 12        # every 12th beyond; multiple of 4, so dates
-    watchlist_size: 8            # stay on the grid crossing the boundary
+    watchlist_size: 3            # stay on the grid crossing the boundary
 
   - name: Seattle to New Orleans
     origin: SEA
@@ -99,4 +120,4 @@ routes:
     saver_target_price: 358
     near_stride_days: 4
     sweep_stride_days: 12
-    watchlist_size: 8
+    watchlist_size: 3
