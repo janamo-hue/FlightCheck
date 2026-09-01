@@ -30,8 +30,8 @@
     "SEA-MSY": "2026-08-31"
   },
   "quota": {
-    "calls": 915,
-    "month": "2026-08"
+    "calls": 6,
+    "month": "2026-09"
   },
   "runs": [
     {
@@ -278,6 +278,13 @@
       "calls": 17,
       "emailed": true,
       "observations": 17
+    },
+    {
+      "alerts": 0,
+      "at": "2026-09-01T06:14:19.753966+00:00",
+      "calls": 6,
+      "emailed": false,
+      "observations": 6
     }
   ],
   "sweep_cycles": {},
